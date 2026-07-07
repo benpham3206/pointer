@@ -2,8 +2,6 @@
 //  pointerApp.swift
 //  pointer Watch App
 //
-//  Created by Benjamin Pham on 5/16/26.
-//
 
 import SwiftUI
 
