@@ -5,7 +5,7 @@ JSON lines:
   motion: {roll,yaw,pitch,...}
   click:  {type:click} or {click:1}
   reset:  {type:reset}  — clear origin-only mode (not calib)
-  calib:  {type:calib, corner:tl|tr|bl|br, roll,yaw,pitch}
+  calib:  {type:calib, corner:tl|tr|bl|br, roll,yaw,pitch}  (capture order TL→TR→BL→BR)
   calib_clear: {type:calib_clear}
 
 After 4 corners, maps Δrad (roll/yaw/pitch) → pixels via affine fit:
@@ -87,7 +87,11 @@ kCGMouseButtonLeft = 0
 kCGHIDEventTap = 0
 kCGEventSourceStateHIDSystemState = 1
 
-CORNERS = ("tl", "tr", "br", "bl")  # clockwise from top-left
+CORNERS = ("tl", "tr", "bl", "br")  # capture order: top row L→R, then bottom row L→R
+# Minimum wrist-attitude spread (radians) between corners for a usable map.
+# Below this the affine fit is degenerate — tiny jitter would slam the cursor to a
+# clamped edge (looks like "cursor doesn't track after calibrating").
+MIN_CALIB_SPAN = 0.06  # ~3.4°
 SCREEN_UV = {
     "tl": (0.0, 0.0),
     "tr": (1.0, 0.0),
@@ -312,6 +316,9 @@ class PointerState:
         self.coeff_y: list[float] | None = None
         # fallback origin mode
         self.origin: tuple[float, float, float] | None = None
+        # debug heartbeat
+        self._frames = 0
+        self._last_hb = 0.0
         self.load_calib()
         print(
             f"display id={display['id']} main={display['main']} "
@@ -378,6 +385,30 @@ class PointerState:
             sx = self.x0 + u * (self.w - 1)
             sy = self.y0 + v * (self.h - 1)
             samples.append((r, yw, p, sx, sy))
+
+        # Reject degenerate calibrations (corners too close together) before applying.
+        yaws = [c[1] for c in self.corners.values()]
+        rolls = [c[0] for c in self.corners.values()]
+        dy = max(yaws) - min(yaws)
+        dr = max(rolls) - min(rolls)
+        if dy < MIN_CALIB_SPAN or dr < MIN_CALIB_SPAN:
+            self.coeff_x = self.coeff_y = None
+            emit_failure(
+                failure_payload(
+                    "mac_pointer_server.rebuild_map",
+                    f"corner spread too small (yaw {dy:.3f} rad, roll {dr:.3f} rad); "
+                    f"aim at DISTINCT corners. Staying in fallback tracking mode.",
+                    "invalidPayload",
+                ),
+                min_interval=0.0,
+            )
+            print(
+                f"calib REJECTED: spread yaw={dy:.4f} roll={dr:.4f} rad "
+                f"(need ≥{MIN_CALIB_SPAN}). Cursor stays in fallback mode.",
+                flush=True,
+            )
+            return
+
         fit = fit_affine_3d(samples)
         if not fit:
             print("calib fit failed — check distinct corner poses", flush=True)
@@ -437,6 +468,18 @@ class PointerState:
             pitch = float(obj.get("pitch", 0.0))
         except (TypeError, ValueError):
             return
+
+        # Debug heartbeat: prove motion frames are arriving and show the active mode.
+        self._frames += 1
+        now = time.monotonic()
+        if now - self._last_hb >= 2.0:
+            self._last_hb = now
+            mode = "calibrated" if (self.coeff_x and self.coeff_y) else "fallback"
+            print(
+                f"motion {self._frames} frames · mode={mode} · "
+                f"roll={roll:.3f} yaw={yaw:.3f}",
+                flush=True,
+            )
 
         if self.coeff_x and self.coeff_y:
             self._move_calibrated(roll, yaw, pitch)
@@ -547,7 +590,7 @@ def main() -> int:
     sock.bind(("0.0.0.0", args.port))
     sock.listen(8)
     print(f"listening TCP :{args.port}", flush=True)
-    print("Calibrate: point Watch at TL→TR→BR→BL, capture each corner.", flush=True)
+    print("Calibrate: point Watch at TL→TR→BL→BR, capture each corner.", flush=True)
 
     def shutdown(*_):
         print("shutdown", flush=True)

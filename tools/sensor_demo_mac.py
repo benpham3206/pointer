@@ -3,7 +3,7 @@
 
   python3 tools/sensor_demo_mac.py
 
-No Watch or iPhone required. For real hardware see SENSOR_TRACKER.md.
+No Watch or iPhone required. For real hardware see docs/SENSOR_TRACKER.md.
 """
 
 from __future__ import annotations

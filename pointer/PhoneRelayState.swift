@@ -20,6 +20,9 @@ final class PhoneRelayState: ObservableObject {
     @Published var lastMessageAt: Date?
     @Published var lastControlMessage: String?
     @Published var isBackgroundRelayActive: Bool = false
+    /// Latest error mirrored from the Watch app (see MotionManager.mirrorErrorToPhone).
+    @Published var lastWatchError: String?
+    @Published var lastWatchErrorAt: Date?
 
     /// True if we are actively receiving samples, or WCSession says reachable.
     var isConnected: Bool {
@@ -60,6 +63,12 @@ final class PhoneRelayState: ObservableObject {
         lastControlMessage = type
         messagesReceived &+= 1
         lastMessageAt = Date()
+    }
+
+    /// Record an error the Watch mirrored to us (for display in the companion UI).
+    func applyWatchError(_ message: String) {
+        lastWatchError = message
+        lastWatchErrorAt = Date()
     }
 
     func applyFailure(

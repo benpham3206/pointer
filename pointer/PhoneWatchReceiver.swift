@@ -95,6 +95,7 @@ final class PhoneWatchReceiver: NSObject, ObservableObject, WCSessionDelegate {
     var lastPayload: MotionPayload? { relayState.lastPayload }
     var lastControlMessage: String? { relayState.lastControlMessage }
     var lastErrorDescription: String? { relayState.lastErrorDescription }
+    var lastWatchError: String? { relayState.lastWatchError }
     var isBackgroundRelayActive: Bool { relayState.isBackgroundRelayActive }
     var statusSummary: String { relayState.statusSummary }
 
@@ -157,6 +158,15 @@ final class PhoneWatchReceiver: NSObject, ObservableObject, WCSessionDelegate {
         }
 
         let type = message["type"] as? String
+
+        // Errors mirrored from the Watch: surface in the companion UI only —
+        // never forward them to the Mac cursor server.
+        if type == "watch_error" {
+            let msg = (message["message"] as? String) ?? "Watch reported an error"
+            DispatchQueue.main.async { self.relayState.applyWatchError(msg) }
+            return
+        }
+
         DispatchQueue.main.async {
             if let payload = MotionPayload.fromDictionary(message) {
                 self.relayState.recordMessage(payload)

@@ -131,6 +131,12 @@ struct ContentView: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
                 }
+                if let watchError = phoneWatchReceiver.lastWatchError {
+                    Text("⌚️ Watch: \(watchError)")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding()
         }

@@ -43,6 +43,9 @@ final class MotionManager: NSObject, ObservableObject {
     @Published var isSimulatedSource = false
     @Published var barometerAvailable = false
     @Published var lastError: String?
+    /// True while the user is capturing calibration corners. Cursor streaming is paused
+    /// (so the Mac cursor holds still while aiming) but IMU sampling keeps running.
+    @Published var isCalibrating = false
 
     @Published var lastRoll: Double = 0
     @Published var lastPitch: Double = 0
@@ -62,11 +65,13 @@ final class MotionManager: NSObject, ObservableObject {
     private var simPhase: Double = 0
     private var lastSend = Date.distantPast
     private var lastUIPublish = Date.distantPast
-    private var lastWakeAttempt = Date.distantPast
+    private var lastMotionErrorAt = Date.distantPast
     private let minSendInterval: TimeInterval = 0.05  // 20 Hz → phone (smoother cursor)
     private let minUIInterval: TimeInterval = 0.15    // ~6.5 Hz → SwiftUI
-    private let minWakeInterval: TimeInterval = 1.0
-    private var clickPiggyback = false
+
+    // Error mirroring to the paired iPhone (throttled, guaranteed transport).
+    private var lastMirrorMessage: String?
+    private var lastMirrorAt = Date.distantPast
 
     // Latest raw sample (updated off main via hop)
     private var rawRoll = 0.0
@@ -78,6 +83,14 @@ final class MotionManager: NSObject, ObservableObject {
     private var rawGx = 0.0
     private var rawGy = 0.0
     private var rawGz = 0.0
+
+    // Exponential moving-average low-pass on attitude — smooths the cursor.
+    // alpha 0.1–0.2 is the sweet spot between lag and smoothness; tweak here.
+    private let attitudeEmaAlpha = 0.15
+    private var emaInitialized = false
+    private var emaRoll = 0.0
+    private var emaPitch = 0.0
+    private var emaYaw = 0.0
 
     private var preferSimulated: Bool {
         #if targetEnvironment(simulator)
@@ -111,7 +124,7 @@ final class MotionManager: NSObject, ObservableObject {
         simPhase = 0
         lastSend = .distantPast
         lastUIPublish = .distantPast
-        lastWakeAttempt = .distantPast
+        emaInitialized = false
 
         // Sensors work without phone.
         if preferSimulated {
@@ -133,7 +146,7 @@ final class MotionManager: NSObject, ObservableObject {
     private func startHardwareUpdates() {
         isSimulatedSource = false
         guard motion.isDeviceMotionAvailable else {
-            lastError = "Device motion unavailable — using SIM"
+            setLastError("Device motion unavailable — using SIM")
             startSimulatedUpdates()
             return
         }
@@ -147,7 +160,7 @@ final class MotionManager: NSObject, ObservableObject {
             guard let self else { return }
             if let error {
                 Task { @MainActor in
-                    self.lastError = error.localizedDescription
+                    self.setLastError("MotionManager.motion: \(error.localizedDescription)")
                     self.log.error("motion: \(error.localizedDescription, privacy: .public)")
                 }
                 return
@@ -214,6 +227,19 @@ final class MotionManager: NSObject, ObservableObject {
         rawGy = gy
         rawGz = gz
 
+        // EMA low-pass the attitude (what drives the cursor). Angle-aware so values
+        // near ±π don't glitch. First sample seeds the filter to avoid a ramp from 0.
+        if emaInitialized {
+            emaRoll = angularEma(emaRoll, roll)
+            emaPitch = angularEma(emaPitch, pitch)
+            emaYaw = angularEma(emaYaw, yaw)
+        } else {
+            emaRoll = roll
+            emaPitch = pitch
+            emaYaw = yaw
+            emaInitialized = true
+        }
+
         sampleCount += 1
         let elapsed = Date().timeIntervalSince(hzWindowStart)
         if elapsed >= 1.0 {
@@ -223,12 +249,13 @@ final class MotionManager: NSObject, ObservableObject {
         }
 
         // Throttle SwiftUI @Published churn (crash / jetsam risk on watchOS).
+        // Publish the FILTERED attitude so the display matches what the cursor uses.
         let now = Date()
         if now.timeIntervalSince(lastUIPublish) >= minUIInterval {
             lastUIPublish = now
-            lastRoll = roll
-            lastPitch = pitch
-            lastYaw = yaw
+            lastRoll = emaRoll
+            lastPitch = emaPitch
+            lastYaw = emaYaw
             self.ax = ax
             self.ay = ay
             self.az = az
@@ -237,11 +264,19 @@ final class MotionManager: NSObject, ObservableObject {
             self.gz = gz
         }
 
+        // Send the smoothed attitude to the Mac (accel/gyro pass through raw — display only).
         sendMotionToPhoneIfNeeded(
-            roll: roll, pitch: pitch, yaw: yaw,
+            roll: emaRoll, pitch: emaPitch, yaw: emaYaw,
             ax: ax, ay: ay, az: az,
             gx: gx, gy: gy, gz: gz
         )
+    }
+
+    /// EMA step that respects angle wrap-around (shortest path), so roll/yaw near ±π
+    /// don't average across the seam into a wrong value.
+    private func angularEma(_ current: Double, _ sample: Double) -> Double {
+        let delta = atan2(sin(sample - current), cos(sample - current))
+        return current + attitudeEmaAlpha * delta
     }
 
     private func sendMotionToPhoneIfNeeded(
@@ -249,6 +284,8 @@ final class MotionManager: NSObject, ObservableObject {
         ax: Double, ay: Double, az: Double,
         gx: Double, gy: Double, gz: Double
     ) {
+        // Hold the cursor still while the user aims at calibration corners.
+        guard !isCalibrating else { return }
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated else { return }
@@ -257,19 +294,14 @@ final class MotionManager: NSObject, ObservableObject {
         guard now.timeIntervalSince(lastSend) >= minSendInterval else { return }
         lastSend = now
 
-        var dict: [String: Any] = [
+        let dict: [String: Any] = [
             "roll": roll, "pitch": pitch, "yaw": yaw,
             "ax": ax, "ay": ay, "az": az,
             "gx": gx, "gy": gy, "gz": gz,
             "ts": now.timeIntervalSince1970,
         ]
-        if clickPiggyback {
-            dict["click"] = 1
-            dict["type"] = "click"
-            dict["button"] = "left"
-            clickPiggyback = false
-        }
-        // applicationContext works even when isReachable == false (phone app still gets latest).
+        // applicationContext keeps the phone's latest sample even when unreachable
+        // (coalesced, best-effort). Discrete clicks go separately via sendControl.
         do {
             try session.updateApplicationContext(dict)
         } catch {
@@ -279,30 +311,27 @@ final class MotionManager: NSObject, ObservableObject {
                 failureType: "transportUnavailable"
             )
         }
-        if session.isReachable {
-            session.sendMessage(dict, replyHandler: nil) { [weak self] error in
-                Task { @MainActor in
-                    self?.recordFailure(
-                        component: "MotionManager.sendMotionToPhoneIfNeeded",
-                        rootCause: error.localizedDescription,
-                        failureType: "networkFailure"
-                    )
-                }
-            }
-        } else if now.timeIntervalSince(lastWakeAttempt) >= minWakeInterval {
-            lastWakeAttempt = now
-            var wake = dict
-            wake["type"] = "wake"
-            session.sendMessage(wake, replyHandler: nil) { [weak self] error in
-                Task { @MainActor in
-                    self?.recordFailure(
-                        component: "MotionManager.wakePhone",
-                        rootCause: error.localizedDescription,
-                        failureType: "networkFailure"
-                    )
-                }
+        // Realtime path only when the phone is actually reachable. No "wake" pings:
+        // sendMessage requires reachability, so pinging while unreachable only ever
+        // produced the networkFailure errors the user was seeing.
+        guard session.isReachable else { return }
+        session.sendMessage(dict, replyHandler: nil) { [weak self] error in
+            Task { @MainActor in
+                self?.recordMotionSendFailure(error.localizedDescription)
             }
         }
+    }
+
+    /// Throttled recording of realtime motion-send failures (avoids 20 Hz error spam).
+    private func recordMotionSendFailure(_ rootCause: String) {
+        let now = Date()
+        guard now.timeIntervalSince(lastMotionErrorAt) >= 1.0 else { return }
+        lastMotionErrorAt = now
+        recordFailure(
+            component: "MotionManager.sendMotionToPhoneIfNeeded",
+            rootCause: rootCause,
+            failureType: "networkFailure"
+        )
     }
 
     private func sendControl(_ dict: [String: Any]) {
@@ -324,39 +353,54 @@ final class MotionManager: NSObject, ObservableObject {
             return
         }
 
-        do {
-            try session.updateApplicationContext(dict)
-        } catch {
-            recordFailure(
-                component: "MotionManager.sendControl",
-                rootCause: error.localizedDescription,
-                failureType: "transportUnavailable"
-            )
-        }
-        session.transferUserInfo(dict)
-        session.sendMessage(dict, replyHandler: nil) { [weak self] error in
-            Task { @MainActor in
-                self?.recordFailure(
-                    component: "MotionManager.sendControl",
-                    rootCause: error.localizedDescription,
-                    failureType: "networkFailure"
-                )
+        // Discrete control events (reset / calib / click) must arrive exactly once.
+        //  • Reachable   → low-latency sendMessage; on a real error, fall back to the
+        //                  guaranteed queue instead of surfacing a networkFailure.
+        //  • Unreachable → transferUserInfo (guaranteed, FIFO, survives app relaunch).
+        // Sending via a single transport (not all three) avoids duplicate delivery —
+        // which previously produced double-clicks — and removes the spurious
+        // "sendControl [networkFailure]" seen whenever the phone was not foregrounded.
+        if session.isReachable {
+            session.sendMessage(dict, replyHandler: nil) { [weak self] error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    WCSession.default.transferUserInfo(dict)
+                    self.log.error("sendControl live send failed, queued via transferUserInfo: \(error.localizedDescription, privacy: .public)")
+                }
             }
+        } else {
+            session.transferUserInfo(dict)
         }
+    }
+
+    /// Enter calibration: pause cursor streaming (IMU keeps running so corners settle).
+    func beginCalibration() {
+        isCalibrating = true
+        log.notice("calibration started — cursor streaming paused")
+    }
+
+    /// Leave calibration: resume streaming the (now calibrated) motion to the Mac.
+    func endCalibration() {
+        guard isCalibrating else { return }
+        isCalibrating = false
+        lastSend = .distantPast
+        log.notice("calibration ended — cursor streaming resumed")
     }
 
     /// Capture current attitude as a monitor corner for Mac calibration.
     func sendCalibCorner(_ corner: String) {
+        // Capture the smoothed (EMA) attitude so the corner pose matches the live
+        // filtered motion the Mac fits its map against.
         let dict: [String: Any] = [
             "type": "calib",
             "corner": corner,
-            "roll": lastRoll,
-            "yaw": lastYaw,
-            "pitch": lastPitch,
+            "roll": emaRoll,
+            "yaw": emaYaw,
+            "pitch": emaPitch,
             "ts": Date().timeIntervalSince1970,
         ]
         sendControl(dict)
-        log.notice("calib corner \(corner, privacy: .public)")
+        log.notice("calib corner \(corner, privacy: .public) roll=\(self.emaRoll) yaw=\(self.emaYaw)")
     }
 
     func sendCalibClear() {
@@ -365,25 +409,6 @@ final class MotionManager: NSObject, ObservableObject {
 
     /// Immediate left-click → iPhone → Mac (all delivery paths).
     func sendClick() {
-
-        guard WCSession.isSupported() else {
-            recordFailure(
-                component: "MotionManager.sendClick",
-                rootCause: "WatchConnectivity is not supported on this watch",
-                failureType: "transportUnavailable"
-            )
-            return
-        }
-        let session = WCSession.default
-        guard session.activationState == .activated else {
-            recordFailure(
-                component: "MotionManager.sendClick",
-                rootCause: "WCSession is not activated",
-                failureType: "activationFailure"
-            )
-            return
-        }
-        clickPiggyback = true
         let dict: [String: Any] = [
             "type": "click",
             "button": "left",
@@ -391,8 +416,10 @@ final class MotionManager: NSObject, ObservableObject {
             "ts": Date().timeIntervalSince1970,
         ]
         lastError = nil
+        // sendControl delivers exactly once (sendMessage when reachable, else the
+        // guaranteed transferUserInfo queue) — no more double-clicks or lost taps.
         sendControl(dict)
-        log.notice("click delivery requested reachable=\(session.isReachable)")
+        log.notice("click delivery requested reachable=\(WCSession.default.isReachable)")
     }
 
     func stopTracking() {
@@ -401,6 +428,7 @@ final class MotionManager: NSObject, ObservableObject {
         simTimer?.invalidate()
         simTimer = nil
         isTracking = false
+        isCalibrating = false
         samplesPerSecond = 0
         isSimulatedSource = false
         relativeAltitudeM = nil
@@ -413,8 +441,42 @@ final class MotionManager: NSObject, ObservableObject {
             rootCause: rootCause,
             failureType: failureType
         )
-        lastError = failure.description
+        setLastError(failure.description)
         log.error("\(failure.description, privacy: .public)")
+    }
+
+    /// Sets the watch-visible error and mirrors it to the paired iPhone.
+    private func setLastError(_ message: String) {
+        lastError = message
+        mirrorErrorToPhone(message)
+    }
+
+    /// Mirror a watch error to the iPhone companion (throttled, guaranteed transport).
+    private func mirrorErrorToPhone(_ message: String) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let now = Date()
+        // Avoid flooding: skip identical messages within a short window.
+        if message == lastMirrorMessage, now.timeIntervalSince(lastMirrorAt) < 2.0 { return }
+        lastMirrorMessage = message
+        lastMirrorAt = now
+        let payload: [String: Any] = [
+            "type": "watch_error",
+            "message": message,
+            "ts": now.timeIntervalSince1970,
+        ]
+        // Deliver immediately when the phone is reachable (foreground) so the error
+        // shows up right away — transferUserInfo is a background transfer that is
+        // delayed on-device and does not deliver between simulators. Fall back to the
+        // guaranteed queue when unreachable. Never record a failure here (would recurse).
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil) { _ in
+                WCSession.default.transferUserInfo(payload)
+            }
+        } else {
+            session.transferUserInfo(payload)
+        }
     }
 }
 
@@ -428,7 +490,7 @@ extension MotionManager: WCSessionDelegate {
             self.sessionActivated = activationState == .activated
             self.sessionReachable = session.isReachable
             if let error {
-                self.lastError = error.localizedDescription
+                self.setLastError("MotionManager.session activation: \(error.localizedDescription)")
             }
         }
     }

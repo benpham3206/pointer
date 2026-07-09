@@ -11,12 +11,12 @@ struct ContentView: View {
     @State private var calibStep: Int = 0 // 0 = off; 1...4 corners
     @State private var lastCalibLabel = ""
 
-    private let calibCorners = ["tl", "tr", "br", "bl"]
+    private let calibCorners = ["tl", "tr", "bl", "br"]
     private let calibTitles = [
         "Top-left",
         "Top-right",
-        "Bottom-right",
         "Bottom-left",
+        "Bottom-right",
     ]
 
     var body: some View {
@@ -39,13 +39,12 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Button("Calibrate corners") {
-                            calibStep = 1
-                            lastCalibLabel = ""
+                            startCalibration()
                         }
                         .tint(.purple)
                     }
                 } else {
-                    Text("Start tracking, then Calibrate TL→TR→BR→BL by pointing at each corner.")
+                    Text("Start tracking, then Calibrate TL→TR→BL→BR by pointing at each corner.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -77,7 +76,7 @@ struct ContentView: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("Calib \(calibStep)/4")
                 .font(.caption.bold())
-            Text("Point at \(calibTitles[idx]) corner, then Capture.")
+            Text("Cursor paused — aim at \(calibTitles[idx]) corner, then Capture.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Button("Capture \(calibTitles[idx])") {
@@ -85,17 +84,30 @@ struct ContentView: View {
             }
             .tint(.orange)
             Button("Cancel calib") {
-                calibStep = 0
+                finishCalibration("Calibration cancelled")
             }
             .font(.caption2)
             Button("Clear Mac calib") {
                 motionManager.sendCalibClear()
-                lastCalibLabel = "Clear sent"
-                calibStep = 0
+                finishCalibration("Clear sent")
             }
             .font(.caption2)
             .foregroundStyle(.red)
         }
+    }
+
+    /// Enter calibration: pause cursor tracking so the Mac cursor holds still while aiming.
+    private func startCalibration() {
+        motionManager.beginCalibration()
+        calibStep = 1
+        lastCalibLabel = ""
+    }
+
+    /// Leave calibration by any path: resume cursor tracking.
+    private func finishCalibration(_ label: String) {
+        motionManager.endCalibration()
+        calibStep = 0
+        lastCalibLabel = label
     }
 
     private func captureCorner(_ idx: Int) {
@@ -103,8 +115,7 @@ struct ContentView: View {
         motionManager.sendCalibCorner(corner)
         lastCalibLabel = "Sent \(calibTitles[idx])"
         if calibStep >= 4 {
-            calibStep = 0
-            lastCalibLabel = "All 4 corners sent — Mac should fit map"
+            finishCalibration("All 4 corners sent — tracking resumed")
         } else {
             calibStep += 1
         }
@@ -143,7 +154,11 @@ struct ContentView: View {
                     .font(.headline)
             }
             HStack(spacing: 6) {
-                pill(motionManager.isTracking ? "LIVE" : "IDLE", motionManager.isTracking ? .green : .gray)
+                if motionManager.isCalibrating {
+                    pill("CALIB", .orange)
+                } else {
+                    pill(motionManager.isTracking ? "LIVE" : "IDLE", motionManager.isTracking ? .green : .gray)
+                }
                 if motionManager.isSimulatedSource {
                     pill("SIM", .purple)
                 }

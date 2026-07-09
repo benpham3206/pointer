@@ -12,4 +12,4 @@ python3 tools/sensor_demo_mac.py
 
 **Xcode:** Run **pointer Watch App** → **Start tracking** (Simulator shows **SIM** + baro).
 
-Full steps: **[SENSOR_TRACKER.md](SENSOR_TRACKER.md)**
+Full steps: **[docs/SENSOR_TRACKER.md](docs/SENSOR_TRACKER.md)**

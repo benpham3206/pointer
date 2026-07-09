@@ -13,7 +13,7 @@
 7. **Build Settings → Code Signing Entitlements**: `pointer Mac/pointerMac.entitlements`
 8. Scheme: run **pointer Mac** on **My Mac**.
 
-`MACOS_TARGET_ANALYSIS.md` in the repo root has full pbxproj notes; prefer the Xcode UI over hand-editing `project.pbxproj`.
+`docs/MACOS_TARGET_ANALYSIS.md` has full pbxproj notes; prefer the Xcode UI over hand-editing `project.pbxproj`.
 
 ## Generated Info.plist additions
 
