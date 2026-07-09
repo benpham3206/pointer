@@ -305,11 +305,8 @@ final class MotionManager: NSObject, ObservableObject {
         do {
             try session.updateApplicationContext(dict)
         } catch {
-            recordFailure(
-                component: "MotionManager.sendMotionToPhoneIfNeeded",
-                rootCause: error.localizedDescription,
-                failureType: "transportUnavailable"
-            )
+            // Transient — log only, don't nag the UI (see recordMotionSendFailure).
+            log.error("applicationContext (transient): \(error.localizedDescription, privacy: .public)")
         }
         // Realtime path only when the phone is actually reachable. No "wake" pings:
         // sendMessage requires reachability, so pinging while unreachable only ever
@@ -322,16 +319,14 @@ final class MotionManager: NSObject, ObservableObject {
         }
     }
 
-    /// Throttled recording of realtime motion-send failures (avoids 20 Hz error spam).
+    /// Realtime motion-send hiccups are transient (phone briefly unreachable) and
+    /// self-heal on the next reachable frame — log them for debugging but never surface
+    /// them as a user-facing error or mirror them to the phone.
     private func recordMotionSendFailure(_ rootCause: String) {
         let now = Date()
         guard now.timeIntervalSince(lastMotionErrorAt) >= 1.0 else { return }
         lastMotionErrorAt = now
-        recordFailure(
-            component: "MotionManager.sendMotionToPhoneIfNeeded",
-            rootCause: rootCause,
-            failureType: "networkFailure"
-        )
+        log.error("motion send (transient): \(rootCause, privacy: .public)")
     }
 
     private func sendControl(_ dict: [String: Any]) {

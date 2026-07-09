@@ -26,11 +26,17 @@ struct ContentView: View {
                 clickButton
 
                 if motionManager.isTracking {
-                    sensorGroup(title: "Attitude (rad)", rows: [
-                        ("roll", motionManager.lastRoll),
-                        ("yaw", motionManager.lastYaw),
-                        ("pitch", motionManager.lastPitch),
-                    ])
+                    if motionManager.isCalibrating {
+                        Label("Tracking paused for calibration", systemImage: "pause.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    } else {
+                        sensorGroup(title: "Attitude (rad)", rows: [
+                            ("roll", motionManager.lastRoll),
+                            ("yaw", motionManager.lastYaw),
+                            ("pitch", motionManager.lastPitch),
+                        ])
+                    }
 
                     if calibStep > 0 {
                         calibPanel
