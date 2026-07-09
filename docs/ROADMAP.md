@@ -1,34 +1,19 @@
 # Pointer — Roadmap / Backlog
 
-Captured 2026-07-08. Not yet implemented — planning notes for the next work session.
-Data path today: **Watch → iPhone (`PhoneWatchReceiver`) → `MacForwarder` (Bonjour TCP) → `tools/mac_pointer_server.py` → cursor.**
+Captured 2026-07-08. Data path today: **Watch → iPhone (`PhoneWatchReceiver`) → `MacForwarder` (Bonjour **UDP**, compact binary frames) → `tools/mac_pointer_server.py` → cursor.**
 
 ---
 
-## 1. Smoother tracking (reduce jitter)
-**Goal:** the cursor should feel steady, not jittery.
+## 1. Smoother tracking (reduce jitter) — ✅ DONE (2026-07-09)
+`pointer Watch App/MotionManager.swift`: the fixed EMA is now an **adaptive (One-Euro-lite) EMA** — `attitudeEmaAlpha = 0.08` base (heavy smoothing when nearly still → kills tremor), α ramps with angular speed up to 0.9 (low lag when actually moving). Pairs with the Mac-side dead zone (#2).
+_Next if needed:_ a full One-Euro filter, or Mac-side smoothing independent of watch rate.
 
-**Where it lives now:** `pointer Watch App/MotionManager.swift` — EMA low-pass on attitude, `attitudeEmaAlpha = 0.15` (angle-wrap aware). Mac side does no smoothing.
+## 2. Smaller arm movement — ✅ DONE (2026-07-09)
+`tools/mac_pointer_server.py`: added a **dynamic acceleration curve** (`--accel`, default 1.5) — gentle gain near center (precise), amplified toward the edges so the calibrated wrist range now reaches the actual screen corners — plus a **dead zone** (`--deadzone`, default 2 px) that suppresses sub-threshold moves. `--sensitivity` is the base gain.
+_Next if needed:_ expose gain as a live slider in the watch/phone UI.
 
-**Ideas to try:**
-- Replace/augment the plain EMA with a **One-Euro filter** (the standard for pointing devices: low lag when moving fast, heavy smoothing when slow). Best bang-for-buck.
-- Add a small **dead zone** so micro-tremor below a threshold produces no cursor motion.
-- Smooth on the **Mac side too** (`_move_calibrated` / `_move_fallback` in `mac_pointer_server.py`) so it's independent of watch sample rate.
-- Consider raising the watch sample rate (currently 20 Hz) if battery allows.
-
-**Open question:** tune the existing EMA α first (cheap) vs. jump to One-Euro (better, more code)?
-
-## 2. Smaller arm movement
-**Goal:** cover the whole screen with less physical wrist/arm movement.
-
-**Where it lives now:** `mac_pointer_server.py` `--sensitivity` (default 0.45, scales the calibrated map around center); calibrated affine map spans the captured corner poses.
-
-**Ideas to try:**
-- Raise the gain / expose sensitivity from the watch or phone UI (live slider).
-- Add a **pointer acceleration curve** (small moves = precise, fast moves = cover more) — an exponent on the velocity.
-- Calibrate with intentionally smaller corner angles so the same screen span maps to less wrist travel.
-
-**Interacts with #1** — higher gain amplifies jitter, so do these together.
+## Transport / battery — ✅ DONE (2026-07-09)
+Watch IMU + phone send rate lowered to **15 Hz** (`motionHz` in `MotionManager.swift`) for battery. iPhone→Mac leg rewritten from **TCP + JSON lines → UDP + compact binary frames** (`MacForwarder.encode` ↔ `mac_pointer_server.py parse_frame`; type byte + LE float32). A dropped motion frame is harmless; control frames (click/calib/reset) rely on LAN UDP reliability — revisit with seq/ack + dedup if drops become noticeable.
 
 ## 3. On-screen "liquid glass" pop-up keyboard (Apple-Glass style)
 **Goal:** an Apple/visionOS-style translucent keyboard that pops up for text entry.
@@ -61,4 +46,4 @@ Data path today: **Watch → iPhone (`PhoneWatchReceiver`) → `MacForwarder` (B
 ---
 
 ### Suggested order
-1 + 2 together (smoothing + gain) → 4 (phone as pointer, reuses path) → 3 + 5 (keyboard: Mac key-event support, then iOS UI, then watch UI).
+✅ 1 + 2 (smoothing + gain) and UDP/battery transport are done. **Next:** 4 (phone as pointer, reuses the forward path) → 3 + 5 (keyboard: Mac `CGEventCreateKeyboardEvent` support, then iOS glass UI, then watch UI).

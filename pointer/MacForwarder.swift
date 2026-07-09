@@ -8,10 +8,11 @@ import Foundation
 import Network
 import Combine
 
-/// Discovers Mac pointer hosts via Bonjour and streams motion JSON lines over TCP.
+/// Discovers Mac pointer hosts via Bonjour and streams compact binary motion frames
+/// over UDP (lighter than TCP+JSON; a dropped motion frame is harmless).
 /// Auto-reconnects aggressively when the Mac server restarts or the link drops.
 final class MacForwarder: ObservableObject {
-    static let bonjourType = "_pointer._tcp"
+    static let bonjourType = "_pointer._udp"
 
     enum ConnectionStatus: Equatable {
         case idle
@@ -74,7 +75,7 @@ final class MacForwarder: ObservableObject {
         lastSendError = nil
 
         browser?.cancel()
-        let parameters = NWParameters.tcp
+        let parameters = NWParameters.udp
         parameters.includePeerToPeer = true
 
         let browser = NWBrowser(for: .bonjour(type: Self.bonjourType, domain: nil), using: parameters)
@@ -152,31 +153,35 @@ final class MacForwarder: ObservableObject {
     }
 
     func forwardMotion(_ payload: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(payload) else {
-            applyFailure(
-                component: "MacForwarder.forwardMotion",
-                rootCause: "Payload is not valid JSON",
-                failureType: .serializationFailed
-            )
-            return
-        }
-
-        var data: Data
-        do {
-            data = try JSONSerialization.data(withJSONObject: payload)
-        } catch {
-            applyFailure(
-                component: "MacForwarder.forwardMotion",
-                rootCause: error.localizedDescription,
-                failureType: .serializationFailed
-            )
-            return
-        }
-        data.append(0x0A)
-
+        guard let data = Self.encode(payload) else { return }
         queue.async { [weak self] in
             self?.enqueueOrSend(data)
         }
+    }
+
+    /// Pack a control/motion dict into a compact binary frame (see mac_pointer_server.py
+    /// parse_frame). type byte + little-endian Float32 payload; one datagram per frame.
+    static func encode(_ p: [String: Any]) -> Data? {
+        func f(_ k: String) -> Float {
+            if let d = p[k] as? Double { return Float(d) }
+            if let n = p[k] as? NSNumber { return n.floatValue }
+            return 0
+        }
+        func withFloats(_ prefix: [UInt8], _ keys: [String]) -> Data {
+            var d = Data(prefix)
+            for k in keys { var v = f(k); withUnsafeBytes(of: &v) { d.append(contentsOf: $0) } }
+            return d
+        }
+        let type = p["type"] as? String
+        if type == "click" || (p["click"] as? NSNumber)?.boolValue == true { return Data([0x02]) }
+        if type == "calib_clear" { return Data([0x04]) }
+        if type == "reset" { return Data([0x05]) }
+        if type == "calib" {
+            let idx: [String: UInt8] = ["tl": 0, "tr": 1, "bl": 2, "br": 3]
+            return withFloats([0x03, idx[(p["corner"] as? String) ?? ""] ?? 0], ["roll", "yaw", "pitch"])
+        }
+        guard p["roll"] != nil, p["yaw"] != nil else { return nil }
+        return withFloats([0x01], ["roll", "yaw", "pitch"])
     }
 
     func stopAll() {
@@ -225,7 +230,7 @@ final class MacForwarder: ObservableObject {
         connectedDisplayName = displayName
         DispatchQueue.main.async { self.status = .connecting }
 
-        let parameters = NWParameters.tcp
+        let parameters = NWParameters.udp
         parameters.includePeerToPeer = true
         let connection = NWConnection(to: endpoint, using: parameters)
         self.connection = connection
@@ -344,21 +349,6 @@ final class MacForwarder: ObservableObject {
         }
         reconnectWorkItem = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
-    }
-
-    private func applyFailure(
-        component: String,
-        rootCause: String,
-        failureType: PointerFailurePayload.FailureType
-    ) {
-        let failure = PointerFailurePayload(
-            component: component,
-            rootCause: rootCause,
-            failureType: failureType
-        )
-        DispatchQueue.main.async {
-            self.lastSendError = failure.description
-        }
     }
 }
 #endif

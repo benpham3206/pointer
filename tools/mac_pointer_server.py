@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Bonjour TCP: Watch/iPhone → Mac cursor with 4-corner attitude calibration.
+"""Bonjour UDP: Watch/iPhone → Mac cursor with 4-corner attitude calibration.
 
-JSON lines:
-  motion: {roll,yaw,pitch,...}
-  click:  {type:click} or {click:1}
-  reset:  {type:reset}  — clear origin-only mode (not calib)
-  calib:  {type:calib, corner:tl|tr|bl|br, roll,yaw,pitch}  (capture order TL→TR→BL→BR)
-  calib_clear: {type:calib_clear}
+Wire format = compact binary frames over UDP (see parse_frame), one datagram each:
+  motion / click / calib (corner tl|tr|bl|br) / calib_clear / reset
+  (capture order TL→TR→BL→BR)
 
 After 4 corners, maps Δrad (roll/yaw/pitch) → pixels via affine fit:
   [x y] proportional to attitude within the calibrated pose span
@@ -22,9 +19,9 @@ import json
 import math
 import signal
 import socket
+import struct
 import subprocess
 import sys
-import threading
 import time
 from ctypes import CDLL, POINTER, Structure, byref, c_bool, c_double, c_int32, c_uint32, c_void_p
 from ctypes.util import find_library
@@ -301,8 +298,13 @@ def fit_affine_3d(samples: list[tuple[float, float, float, float, float]]) -> tu
 
 
 class PointerState:
-    def __init__(self, sensitivity: float, display: dict, calib_path: Path):
-        self.sensitivity = sensitivity  # scales calibrated map (1.0 = exact fit)
+    def __init__(self, sensitivity: float, display: dict, calib_path: Path,
+                 deadzone: float = 2.0, accel: float = 1.5):
+        self.sensitivity = sensitivity  # base gain on calibrated map (1.0 = exact fit)
+        self.deadzone = deadzone        # px: ignore sub-threshold moves (kills tremor)
+        self.accel = accel              # extra gain toward edges (reach with less travel)
+        self._last_x: float | None = None
+        self._last_y: float | None = None
         self.display = display
         self.x0 = display["x"]
         self.y0 = display["y"]
@@ -486,20 +488,28 @@ class PointerState:
         else:
             self._move_fallback(roll, yaw, pitch)
 
+    def _emit(self, x: float, y: float) -> None:
+        x = max(self.x0, min(self.x0 + self.w - 1, x))
+        y = max(self.y0, min(self.y0 + self.h - 1, y))
+        # Dead zone: ignore tiny moves so micro-tremor doesn't jitter the cursor.
+        if self._last_x is not None and math.hypot(x - self._last_x, y - self._last_y) < self.deadzone:
+            return
+        self._last_x, self._last_y = x, y
+        mouse_move(x, y)
+
     def _move_calibrated(self, roll: float, yaw: float, pitch: float) -> None:
         assert self.coeff_x and self.coeff_y
         cx, cy = self.coeff_x, self.coeff_y
-        # Affine already spans monitor corners; sensitivity scales around center.
         x = cx[0] * roll + cx[1] * yaw + cx[2] * pitch + cx[3]
         y = cy[0] * roll + cy[1] * yaw + cy[2] * pitch + cy[3]
-        if self.sensitivity != 1.0:
-            mid_x = self.x0 + self.w / 2
-            mid_y = self.y0 + self.h / 2
-            x = mid_x + (x - mid_x) * self.sensitivity
-            y = mid_y + (y - mid_y) * self.sensitivity
-        x = max(self.x0, min(self.x0 + self.w - 1, x))
-        y = max(self.y0, min(self.y0 + self.h - 1, y))
-        mouse_move(x, y)
+        mid_x, mid_y = self.x0 + self.w / 2, self.y0 + self.h / 2
+        # Dynamic acceleration: gentle near center (precise), amplified toward the
+        # edges — so a small wrist tilt still reaches the screen corners.
+        nx = (x - mid_x) / (self.w / 2)
+        ny = (y - mid_y) / (self.h / 2)
+        gx = self.sensitivity * (1.0 + self.accel * abs(nx))
+        gy = self.sensitivity * (1.0 + self.accel * abs(ny))
+        self._emit(mid_x + (x - mid_x) * gx, mid_y + (y - mid_y) * gy)
 
     def _move_fallback(self, roll: float, yaw: float, pitch: float) -> None:
         # Uncalibrated: origin + rad * (monitor_dim / typical_span)
@@ -516,44 +526,48 @@ class PointerState:
         # Use yaw→X, roll→Y; pitch adds to Y slightly
         x = self.x0 + self.w / 2 + (yaw - oy) * sx * s
         y = self.y0 + self.h / 2 - (roll - or_) * sy * s - (pitch - op) * sy * 0.3 * s
-        x = max(self.x0, min(self.x0 + self.w - 1, x))
-        y = max(self.y0, min(self.y0 + self.h - 1, y))
-        mouse_move(x, y)
+        self._emit(x, y)
 
 
-def handle_client(conn: socket.socket, addr, state: PointerState) -> None:
-    print(f"client {addr}", flush=True)
-    buf = b""
-    try:
-        while True:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line.decode("utf-8"))
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(obj, dict):
-                    state.handle(obj)
-    finally:
-        conn.close()
-        print(f"client closed {addr}", flush=True)
+_CORNER_NAMES = ("tl", "tr", "bl", "br")
+
+
+def parse_frame(data: bytes) -> dict | None:
+    """Decode a compact binary frame (little-endian float32). See MacForwarder.encode.
+
+      0x01 roll yaw pitch          motion
+      0x02                         left click
+      0x03 corner roll yaw pitch   calibration corner
+      0x04                         calib_clear
+      0x05                         reset
+    """
+    if not data:
+        return None
+    t = data[0]
+    if t == 0x01 and len(data) >= 13:
+        r, y, p = struct.unpack_from("<fff", data, 1)
+        return {"roll": r, "yaw": y, "pitch": p}
+    if t == 0x02:
+        return {"type": "click"}
+    if t == 0x03 and len(data) >= 14:
+        c = data[1]
+        r, y, p = struct.unpack_from("<fff", data, 2)
+        return {"type": "calib", "corner": _CORNER_NAMES[c] if c < 4 else "", "roll": r, "yaw": y, "pitch": p}
+    if t == 0x04:
+        return {"type": "calib_clear"}
+    if t == 0x05:
+        return {"type": "reset"}
+    return None
 
 
 def register_bonjour(port: int) -> subprocess.Popen | None:
     try:
         proc = subprocess.Popen(
-            ["dns-sd", "-R", "pointer", "_pointer._tcp", "local", str(port)],
+            ["dns-sd", "-R", "pointer", "_pointer._udp", "local", str(port)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        print(f"bonjour: pointer._pointer._tcp local:{port} (pid {proc.pid})", flush=True)
+        print(f"bonjour: pointer._pointer._udp local:{port} (pid {proc.pid})", flush=True)
         return proc
     except FileNotFoundError:
         return None
@@ -569,6 +583,8 @@ def main() -> int:
         help="Scale factor on calibrated map (1=exact corner fit). Uncalibrated: scales px/rad.",
     )
     ap.add_argument("--display", choices=("external", "main", "largest"), default="external")
+    ap.add_argument("--deadzone", type=float, default=2.0, help="px; ignore sub-threshold moves")
+    ap.add_argument("--accel", type=float, default=1.5, help="extra gain toward screen edges (0=off)")
     ap.add_argument(
         "--calib-file",
         type=Path,
@@ -582,14 +598,14 @@ def main() -> int:
     if failure := accessibility_failure("mac_pointer_server.startup"):
         emit_failure(failure, min_interval=0.0)
     display = pick_display(args.display)
-    state = PointerState(args.sensitivity, display, args.calib_file)
+    state = PointerState(args.sensitivity, display, args.calib_file,
+                         deadzone=args.deadzone, accel=args.accel)
     bonjour = register_bonjour(args.port)
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", args.port))
-    sock.listen(8)
-    print(f"listening TCP :{args.port}", flush=True)
+    print(f"listening UDP :{args.port}", flush=True)
     print("Calibrate: point Watch at TL→TR→BL→BR, capture each corner.", flush=True)
 
     def shutdown(*_):
@@ -606,8 +622,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, shutdown)
 
     while True:
-        conn, addr = sock.accept()
-        threading.Thread(target=handle_client, args=(conn, addr, state), daemon=True).start()
+        data, _addr = sock.recvfrom(2048)
+        obj = parse_frame(data)
+        if obj:
+            state.handle(obj)
 
 
 if __name__ == "__main__":

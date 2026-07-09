@@ -66,7 +66,9 @@ final class MotionManager: NSObject, ObservableObject {
     private var lastSend = Date.distantPast
     private var lastUIPublish = Date.distantPast
     private var lastMotionErrorAt = Date.distantPast
-    private let minSendInterval: TimeInterval = 0.05  // 20 Hz → phone (smoother cursor)
+    // Lower rate = less Watch CoreMotion + WCSession traffic = better battery.
+    private let motionHz: Double = 15
+    private var minSendInterval: TimeInterval { 1.0 / motionHz }
     private let minUIInterval: TimeInterval = 0.15    // ~6.5 Hz → SwiftUI
 
     // Error mirroring to the paired iPhone (throttled, guaranteed transport).
@@ -84,9 +86,10 @@ final class MotionManager: NSObject, ObservableObject {
     private var rawGy = 0.0
     private var rawGz = 0.0
 
-    // Exponential moving-average low-pass on attitude — smooths the cursor.
-    // alpha 0.1–0.2 is the sweet spot between lag and smoothness; tweak here.
-    private let attitudeEmaAlpha = 0.15
+    // Adaptive EMA (One-Euro-lite): base = heavy smoothing when nearly still (kills
+    // jitter); alpha ramps up with angular speed for low lag when actually moving.
+    private let attitudeEmaAlpha = 0.08
+    private let attitudeEmaSpeedGain = 10.0
     private var emaInitialized = false
     private var emaRoll = 0.0
     private var emaPitch = 0.0
@@ -152,8 +155,7 @@ final class MotionManager: NSObject, ObservableObject {
         }
 
         motion.stopDeviceMotionUpdates()
-        // 20 Hz is plenty for cursor + display; safer on Watch than 60.
-        motion.deviceMotionUpdateInterval = 1.0 / 20.0
+        motion.deviceMotionUpdateInterval = 1.0 / motionHz
 
         // Default reference frame (no .xArbitraryZVertical) — fewer crash paths.
         motion.startDeviceMotionUpdates(to: motionQueue) { [weak self] data, error in
@@ -190,7 +192,7 @@ final class MotionManager: NSObject, ObservableObject {
     private func startSimulatedUpdates() {
         isSimulatedSource = true
         simTimer?.invalidate()
-        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0 / motionHz, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isTracking else { return }
                 self.simPhase += 0.12
@@ -276,7 +278,9 @@ final class MotionManager: NSObject, ObservableObject {
     /// don't average across the seam into a wrong value.
     private func angularEma(_ current: Double, _ sample: Double) -> Double {
         let delta = atan2(sin(sample - current), cos(sample - current))
-        return current + attitudeEmaAlpha * delta
+        // |delta| is per-sample angular speed: still → base alpha, fast → up to 0.9.
+        let alpha = min(0.9, attitudeEmaAlpha + abs(delta) * attitudeEmaSpeedGain)
+        return current + alpha * delta
     }
 
     private func sendMotionToPhoneIfNeeded(

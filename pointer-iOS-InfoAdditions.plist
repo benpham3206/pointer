@@ -6,7 +6,7 @@
 	<string>Pointer finds your Mac on the local network to forward Apple Watch motion.</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_pointer._tcp</string>
+		<string>_pointer._udp</string>
 	</array>
 </dict>
 </plist>

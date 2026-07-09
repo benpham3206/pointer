@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import WatchKit
 
 struct ContentView: View {
     @StateObject private var motionManager = MotionManager()
@@ -144,6 +145,9 @@ struct ContentView: View {
     }
 
     private func fireClick() {
+        // Immediate wrist haptic so the click "feels" instant even while the
+        // event is still in flight (watch → phone → Mac).
+        WKInterfaceDevice.current().play(.click)
         motionManager.sendClick()
         clickFlash = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
