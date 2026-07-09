@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Pointer finds your Mac on the local network to forward Apple Watch motion.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pointer._tcp</string>
+	</array>
+</dict>
+</plist>
