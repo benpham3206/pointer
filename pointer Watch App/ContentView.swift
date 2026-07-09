@@ -146,7 +146,7 @@ struct ContentView: View {
 
     private func fireClick() {
         // Immediate wrist haptic so the click "feels" instant even while the
-        // event is still in flight (watch → phone → Mac).
+        // event is still in flight (watch → Mac over BLE, or watch → phone → Mac).
         WKInterfaceDevice.current().play(.click)
         motionManager.sendClick()
         clickFlash = true
@@ -172,7 +172,12 @@ struct ContentView: View {
                 if motionManager.isSimulatedSource {
                     pill("SIM", .purple)
                 }
-                pill(motionManager.sessionReachable ? "iPhone" : "no phone", motionManager.sessionReachable ? .blue : .orange)
+                switch motionManager.bleLinkState {
+                case .connected:
+                    pill("BLE", .green)
+                case .scanning, .starting, .unavailable:
+                    pill("iPhone", motionManager.sessionReachable ? .blue : .orange)
+                }
                 if motionManager.isTracking {
                     Text(String(format: "%.0f Hz", motionManager.samplesPerSecond))
                         .font(.caption2.monospacedDigit())

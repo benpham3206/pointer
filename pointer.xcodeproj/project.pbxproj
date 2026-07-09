@@ -342,6 +342,7 @@
 				DEVELOPMENT_TEAM = 9M7LCBZPAV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_CFBundleDisplayName = pointer;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = bp.pointer;
@@ -377,6 +378,7 @@
 				DEVELOPMENT_TEAM = 9M7LCBZPAV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_CFBundleDisplayName = pointer;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = bp.pointer;

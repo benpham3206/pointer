@@ -33,12 +33,14 @@ private struct WatchFailurePayload: CustomStringConvertible {
 final class MotionManager: NSObject, ObservableObject {
     private let motion = CMMotionManager()
     private let trackingRuntime = TrackingRuntime()
+    private let bleTransport = BLETransport()
     private let log = Logger(subsystem: "bp.pointer.watch", category: "IMU")
     private let motionQueue = OperationQueue()
 
     @Published var isTracking = false
     @Published var sessionReachable = false
     @Published var sessionActivated = false
+    @Published private(set) var bleLinkState: BLETransport.LinkState = .starting
     @Published var samplesPerSecond: Double = 0
     @Published var isSimulatedSource = false
     @Published var barometerAvailable = false
@@ -108,6 +110,18 @@ final class MotionManager: NSObject, ObservableObject {
         motionQueue.name = "bp.pointer.watch.motion"
         motionQueue.maxConcurrentOperationCount = 1
         motionQueue.qualityOfService = .userInitiated
+
+        bleLinkState = bleTransport.linkState
+        bleTransport.onLinkStateChanged = { [weak self] state in
+            self?.bleLinkState = state
+        }
+        bleTransport.onFailure = { [weak self] failure in
+            self?.recordFailure(
+                component: failure.component,
+                rootCause: failure.rootCause,
+                failureType: failure.failureType
+            )
+        }
 
         if WCSession.isSupported() {
             let session = WCSession.default
@@ -267,7 +281,7 @@ final class MotionManager: NSObject, ObservableObject {
         }
 
         // Send the smoothed attitude to the Mac (accel/gyro pass through raw — display only).
-        sendMotionToPhoneIfNeeded(
+        sendMotion(
             roll: emaRoll, pitch: emaPitch, yaw: emaYaw,
             ax: ax, ay: ay, az: az,
             gx: gx, gy: gy, gz: gz
@@ -283,20 +297,41 @@ final class MotionManager: NSObject, ObservableObject {
         return current + alpha * delta
     }
 
-    private func sendMotionToPhoneIfNeeded(
+    private func sendMotion(
         roll: Double, pitch: Double, yaw: Double,
         ax: Double, ay: Double, az: Double,
         gx: Double, gy: Double, gz: Double
     ) {
         // Hold the cursor still while the user aims at calibration corners.
         guard !isCalibrating else { return }
-        guard WCSession.isSupported() else { return }
-        let session = WCSession.default
-        guard session.activationState == .activated else { return }
 
         let now = Date()
         guard now.timeIntervalSince(lastSend) >= minSendInterval else { return }
         lastSend = now
+
+        // A connected Mac peripheral is the direct low-latency path. Motion may be
+        // dropped under BLE backpressure; the next 15 Hz sample replaces it.
+        if bleTransport.sendMotion(roll: roll, yaw: yaw, pitch: pitch) {
+            return
+        }
+
+        sendMotionToPhone(
+            roll: roll, pitch: pitch, yaw: yaw,
+            ax: ax, ay: ay, az: az,
+            gx: gx, gy: gy, gz: gz,
+            now: now
+        )
+    }
+
+    private func sendMotionToPhone(
+        roll: Double, pitch: Double, yaw: Double,
+        ax: Double, ay: Double, az: Double,
+        gx: Double, gy: Double, gz: Double,
+        now: Date
+    ) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
 
         let dict: [String: Any] = [
             "roll": roll, "pitch": pitch, "yaw": yaw,
@@ -334,6 +369,13 @@ final class MotionManager: NSObject, ObservableObject {
     }
 
     private func sendControl(_ dict: [String: Any]) {
+        if let frame = BLETransport.frame(for: dict), bleTransport.sendControl(frame) {
+            return
+        }
+        sendControlToPhone(dict)
+    }
+
+    private func sendControlToPhone(_ dict: [String: Any]) {
         guard WCSession.isSupported() else {
             recordFailure(
                 component: "MotionManager.sendControl",

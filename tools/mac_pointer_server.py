@@ -10,7 +10,7 @@ After 4 corners, maps Δrad (roll/yaw/pitch) → pixels via affine fit:
   and the physical monitor size.
 
 Usage:
-  python3 tools/mac_pointer_server.py --display external --sensitivity 0.45
+  python3 tools/mac_pointer_server.py --display external --sensitivity 0.45 [--ble]
 """
 from __future__ import annotations
 
@@ -573,6 +573,33 @@ def register_bonjour(port: int) -> subprocess.Popen | None:
         return None
 
 
+def start_ble_peripheral(port: int) -> subprocess.Popen | None:
+    """Start the local CoreBluetooth helper without changing UDP-only operation.
+
+    watchOS cannot publish a GATT service, so `--ble` makes this Mac the BLE
+    peripheral and lets the Watch central forward exact frames to localhost UDP.
+    """
+    helper = Path(__file__).with_name("mac_ble_peripheral.swift")
+    if not helper.is_file():
+        emit_failure(failure_payload(
+            "mac_pointer_server.ble",
+            f"Missing CoreBluetooth helper: {helper}",
+            "missingResource",
+        ), min_interval=0.0)
+        return None
+    try:
+        proc = subprocess.Popen(["xcrun", "swift", str(helper), "--port", str(port)])
+    except FileNotFoundError:
+        emit_failure(failure_payload(
+            "mac_pointer_server.ble",
+            "Xcode command-line tools are unavailable; UDP relay remains active.",
+            "dependencyMissing",
+        ), min_interval=0.0)
+        return None
+    print(f"BLE helper started (pid {proc.pid}); Mac advertising Pointer service", flush=True)
+    return proc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=19790)
@@ -585,6 +612,7 @@ def main() -> int:
     ap.add_argument("--display", choices=("external", "main", "largest"), default="external")
     ap.add_argument("--deadzone", type=float, default=2.0, help="px; ignore sub-threshold moves")
     ap.add_argument("--accel", type=float, default=1.5, help="extra gain toward screen edges (0=off)")
+    ap.add_argument("--ble", action="store_true", help="advertise direct Watch BLE transport (requires Xcode command-line tools)")
     ap.add_argument(
         "--calib-file",
         type=Path,
@@ -603,8 +631,20 @@ def main() -> int:
     bonjour = register_bonjour(args.port)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", args.port))
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", args.port))
+    except OSError as error:
+        sock.close()
+        if bonjour:
+            bonjour.terminate()
+        emit_failure(failure_payload(
+            "mac_pointer_server.udp_bind",
+            str(error),
+            "networkBindFailure",
+        ), min_interval=0.0)
+        return 1
+    ble_helper = start_ble_peripheral(args.port) if args.ble else None
     print(f"listening UDP :{args.port}", flush=True)
     print("Calibrate: point Watch at TL→TR→BL→BR, capture each corner.", flush=True)
 
@@ -612,6 +652,8 @@ def main() -> int:
         print("shutdown", flush=True)
         if bonjour:
             bonjour.terminate()
+        if ble_helper:
+            ble_helper.terminate()
         try:
             sock.close()
         except Exception:
