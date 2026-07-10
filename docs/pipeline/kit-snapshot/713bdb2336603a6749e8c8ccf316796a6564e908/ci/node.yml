@@ -1,0 +1,37 @@
+# CI template — Node/TypeScript project
+# Copy to <project>/.github/workflows/ci.yml at STAGE 2 (not release).
+# Requires package.json scripts: lint, typecheck, test, build — create them
+# in Stage 2; a missing script must FAIL the gate, not skip it.
+# The test script must fail on ZERO collected tests (jest/vitest default;
+# do NOT pass --passWithNoTests). Stage 2 evidence includes the five
+# negative canaries (type error, failing test, zero tests, missing linter,
+# placeholder) run against THIS installed workflow — see PIPELINE.md Stage 2.
+# Pin actions to reviewed commit SHAs at Stage 2; @vN tags are placeholders.
+
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4       # PIN to SHA at Stage 2
+      - uses: actions/setup-node@v4     # PIN to SHA at Stage 2
+        with:
+          node-version: 22
+          cache: npm
+      - name: Refuse unpinned actions
+        run: |
+          ! grep -q 'PIN to SHA' .github/workflows/*.yml || {
+            echo "actions not yet pinned to commit SHAs (Stage 2 incomplete)"; exit 1; }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Web frontends: Vercel/Netlify GitHub integration gives per-PR preview
+  # deploys with the URL on the PR. Backend deploy on tag: release.yml.

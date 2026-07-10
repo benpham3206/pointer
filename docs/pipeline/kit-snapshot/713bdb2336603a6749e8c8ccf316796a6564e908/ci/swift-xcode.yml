@@ -1,0 +1,77 @@
+# CI template — Xcode project (macOS/iOS/watchOS)
+# Copy to <project>/.github/workflows/ci.yml at STAGE 2 and set SCHEME/PROJECT.
+# Build-only for simulator-less targets is still a real gate: most
+# model-written Swift that fails, fails at compile time. But Stage 4 requires
+# a test target — enable the test job in the same PR that creates it.
+# Pin actions to reviewed commit SHAs at Stage 2; @vN tags are placeholders.
+
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:                              # workflow-level: visible to ALL jobs
+  PROJECT: SETME.xcodeproj        # ← must be set; a placeholder fails the gate
+  SCHEME: "SETME"                 # ← must be set
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4   # PIN to SHA at Stage 2
+      - name: Refuse placeholders (values AND unpinned actions)
+        run: |
+          [ "$PROJECT" != "SETME.xcodeproj" ] && [ "$SCHEME" != "SETME" ] || {
+            echo "CI template not configured (Stage 2 incomplete)"; exit 1; }
+          ! grep -q 'PIN to SHA' .github/workflows/*.yml || {
+            echo "actions not yet pinned to commit SHAs (Stage 2 incomplete)"; exit 1; }
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -destination 'generic/platform=watchOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+  test-macos:
+    # FAILS CLOSED until a test target exists (Stage 4 requires one).
+    # A red test job is honest; a skipped or absent one would let the
+    # workflow present green with zero tests — that's forbidden (NOT_RUN
+    # is never PASS). Replace the guard + SETME values in the PR that
+    # creates the test target.
+    runs-on: macos-15
+    env:
+      TEST_SCHEME: "SETME-mac"     # ← set with the test target
+    steps:
+      - uses: actions/checkout@v4   # PIN to SHA at Stage 2
+      - name: Refuse placeholder (delete this step when configured)
+        run: |
+          echo "No test target configured — Stage 4 cannot PASS. CI is red on purpose."
+          exit 1
+      - name: Test (green requires a NON-ZERO executed-test count)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$PROJECT" -scheme "$TEST_SCHEME" \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee test-output.log
+          grep -Eq 'Executed [1-9][0-9]* tests?' test-output.log || {
+            echo "zero tests executed — NOT_RUN, failing"; exit 1; }
+
+  python-tools:
+    # For repos with Python tooling (e.g. pointer's mac_pointer_server.py).
+    # pytest with zero collected tests FAILS (no exit-5 tolerance).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4   # PIN to SHA at Stage 2
+      - uses: actions/setup-python@v5   # PIN to SHA at Stage 2
+        with: { python-version: "3.12" }
+      - name: Lint
+        run: pipx run ruff check tools/
+      - name: Test
+        run: |
+          pip install pytest
+          pytest tools/ -q

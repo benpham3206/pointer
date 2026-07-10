@@ -1,0 +1,41 @@
+# DESIGN — pointer
+
+Date: · Author (Fable): · Reviewer (Sol): · Status: draft / reviewed / approved
+
+## Architecture
+Diagram (ASCII is fine) + one paragraph per component: responsibility, owner
+module, what it must never do.
+
+## Data flow
+Source → transforms → sink, with formats and rates at each hop. Mark every
+boundary where data can be **lost, duplicated, stale, or reordered** — each
+mark needs a handling decision.
+
+## Technology selection
+| Choice | Selected | Rejected alternatives | Why | Reversible? |
+|---|---|---|---|---|
+One-way doors get an ADR (`adr.md`) and a [BEN] gate.
+
+## Module / repo structure
+Tree with one line per module. New code lands in exactly one place per
+concern; if two places both plausibly fit, the structure is wrong.
+
+## Error handling & degradation
+For each failure class: detected how, surfaced where, degrades to what.
+Fail-closed vs fail-open decided per class, not per mood.
+
+## Logging & instrumentation
+What is logged at each layer, in what structure, and the question each log
+line exists to answer. Include the latency/health measurement path.
+
+## Test strategy
+Unit / integration / end-to-end split; what each layer can and cannot prove;
+the manual acceptance matrix for anything hardware- or human-facing.
+
+## Security & privacy
+Data at rest/in flight, permissions requested and why, secrets handling
+(never in the repo), threat sketch proportional to exposure.
+
+## Sol review log
+| # | Finding | Severity | Resolution |
+|---|---|---|---|

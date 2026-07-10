@@ -1,0 +1,35 @@
+# PRD — pointer
+
+Date: · Author: · Status: draft / approved
+
+## The atomic question
+One falsifiable question with a number in it. ("Can a wrist point at a
+50×50 px target in <2 s, 9 times out of 10?") If it can't lose, it's a wish.
+
+## Kill criteria (write these first)
+- Dead if: …
+- Dead by (date): …
+
+## Problem
+Who hurts, when, how much. One paragraph.
+
+## The thinnest chain
+One goal → one path → one action → one log. What's the smallest loop that
+closes? That's v1. Everything else is a numbered later.
+
+## Success metric
+The number, how it's measured, and the instrument that measures it.
+
+## Non-goals
+Explicit list. Anything not listed here will be attempted by some model at
+3am; list generously.
+
+## Users & platform
+Who, on what device/OS, in what situation.
+
+## Constraints
+Budget, latency, privacy, hardware, deadlines.
+
+## Open decisions → Decision rows
+| # | Decision | Options | Deadline |
+|---|---|---|---|

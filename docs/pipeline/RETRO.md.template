@@ -1,0 +1,29 @@
+# Retro — pointer · <milestone> · 2026-07-10
+
+Feeds the kit self-update loop (PIPELINE.md Stage 7). Honest > flattering:
+a falsified attempt with a clean postmortem is a win here.
+
+## What shipped
+And the evidence it works (test run, latency number, user action).
+
+## What broke, and where the pipeline was standing at the time
+| Incident | Stage/gate that should have caught it | Did it? Why not? |
+|---|---|---|
+
+## Model scorecard
+| Model | Role this milestone | Over/under-performed routing? | Evidence |
+|---|---|---|---|
+Two consecutive "under" rows for an implementer ⇒ re-run the bake-off.
+
+## Checklist gaps
+Items that should exist in code-review / regression / release / security
+checklists and don't. Exact proposed wording.
+
+## Kit diffs proposed
+| Kit file | Change | Why |
+|---|---|---|
+(or: **"No kit changes"** + one sentence why this milestone taught nothing —
+that's a legal but suspicious answer.)
+
+## Next milestone's one risk
+The single thing most likely to bite next. One sentence.

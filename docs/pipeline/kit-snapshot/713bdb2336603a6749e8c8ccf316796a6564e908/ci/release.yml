@@ -1,0 +1,87 @@
+# CI template — release on tag. FAILS CLOSED until configured.
+# Copy to <project>/.github/workflows/release.yml at Stage 2; configure at
+# Stage 6. Trigger: Ben pushes vX.Y.Z AFTER committing
+# docs/pipeline/releases/vX.Y.Z.md (reviewed SHA + checklists + checksums).
+# CI builds artifacts; humans pull triggers.
+# Pin ALL actions here to reviewed commit SHAs — this workflow has
+# contents:write; a floating tag on a publish action is a supply-chain hole.
+
+name: Release
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest        # macos-15 for Apple artifacts
+    environment: release          # protected env — requires Ben's approval
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4   # PIN to SHA before first use
+
+      - name: Gate — no placeholders anywhere in this workflow
+        run: |
+          ! grep -qE 'CONFIGURE ME|SETME|SET ME' .github/workflows/release.yml || {
+            echo "release workflow still contains placeholders — refusing"; exit 1; }
+          ! grep -q 'PIN to SHA' .github/workflows/release.yml || {
+            echo "publish actions not pinned to commit SHAs — refusing"; exit 1; }
+
+      - name: Gate — release record valid and bound to this exact SHA
+        # The record (committed BEFORE tagging) must contain structured
+        # fields, not prose mentions:
+        #   reviewed_sha: <full 40-char sha>
+        #   artifacts:            (one "- <filename>" per expected artifact)
+        #   sha256: <hash>  <filename>   (one per artifact — build once,
+        #                                 record checksums, THEN tag)
+        run: |
+          REC="docs/pipeline/releases/${GITHUB_REF_NAME}.md"
+          [ -f "$REC" ] || { echo "missing $REC — Stage 6 record not committed"; exit 1; }
+          REC_SHA=$(grep -E '^reviewed_sha:' "$REC" | awk '{print $2}')
+          [ "$REC_SHA" = "$GITHUB_SHA" ] || {
+            echo "reviewed_sha field ($REC_SHA) != tag SHA ($GITHUB_SHA)"; exit 1; }
+          awk '/^artifacts:/{f=1;next} f&&/^- /{print substr($0,3)} f&&!/^- /{exit}' "$REC" > /tmp/expected_artifacts
+          [ -s /tmp/expected_artifacts ] || { echo "record lists no expected artifacts"; exit 1; }
+          # Artifact names must be safe: plain relative filenames only.
+          while IFS= read -r A; do
+            case "$A" in
+              */*|*..*|-*|*[\ \	]*|"") echo "unsafe artifact name: '$A'"; exit 1;;
+            esac
+          done < /tmp/expected_artifacts
+          # Checksum coverage is mandatory: one sha256 line per artifact.
+          while IFS= read -r A; do
+            grep -qE "^sha256: [0-9a-f]{64}  $A\$" "$REC" || {
+              echo "no sha256 recorded for artifact: $A"; exit 1; }
+          done < /tmp/expected_artifacts
+
+      - name: Build (CONFIGURE ME — fails closed until then)
+        run: |
+          echo "Not configured: replace with the real build for this project"
+          echo "(node: npm ci && npm run build; python: uv build;"
+          echo " mac app: xcodebuild archive + notarytool submit --wait + stapler)"
+          exit 1
+
+      - name: Gate — every expected artifact exists, non-empty, checksums match record
+        run: |
+          FAIL=0
+          while IFS= read -r A; do
+            [ -s "dist/$A" ] || { echo "MISSING or EMPTY: dist/$A"; FAIL=1; }
+          done < /tmp/expected_artifacts
+          [ "$FAIL" -eq 0 ] || exit 1
+          (cd dist && while IFS= read -r A; do shasum -a 256 "$A"; done < /tmp/expected_artifacts > SHA256SUMS)
+          REC="docs/pipeline/releases/${GITHUB_REF_NAME}.md"
+          grep -E '^sha256: ' "$REC" | sed 's/^sha256: //' | sort > /tmp/expected_sums
+          sort dist/SHA256SUMS > /tmp/actual_sums
+          diff /tmp/expected_sums /tmp/actual_sums || {
+            echo "checksum mismatch vs pre-tag release record"; exit 1; }
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2   # PIN to SHA before first use
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*
+
+      # Deploy (backend projects): flyctl deploy --remote-only (FLY_API_TOKEN
+      # in the protected environment), or docker build+push by digest.
+      # Never deploy from a laptop; if it isn't in this file, it didn't ship.
