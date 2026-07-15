@@ -99,6 +99,34 @@ final class BLETransport: NSObject, ObservableObject {
         }
 
         let type = payload["type"] as? String
+        if type == "text" {
+            guard let text = payload["text"] as? String else { return nil }
+            let bytes = Array(text.utf8)
+            guard bytes.count <= 255 else { return nil }
+            return Data([0x06, UInt8(bytes.count)] + bytes)
+        }
+        if type == "key" {
+            guard let keycode = (payload["keycode"] as? NSNumber)?.intValue,
+                  let modifiers = (payload["modifiers"] as? NSNumber)?.intValue,
+                  let action = (payload["action"] as? NSNumber)?.intValue,
+                  (0...Int(UInt16.max)).contains(keycode),
+                  (0...Int(UInt8.max)).contains(modifiers),
+                  (0...2).contains(action)
+            else { return nil }
+            return Data([
+                0x07,
+                UInt8(keycode & 0xFF),
+                UInt8((keycode >> 8) & 0xFF),
+                UInt8(modifiers),
+                UInt8(action),
+            ])
+        }
+        guard type == nil
+                || type == "click"
+                || type == "calib_clear"
+                || type == "reset"
+                || type == "calib"
+        else { return nil }
         if type == "click" || (payload["click"] as? NSNumber)?.boolValue == true {
             return Data([0x02])
         }
@@ -111,6 +139,7 @@ final class BLETransport: NSObject, ObservableObject {
                 values: [float("roll"), float("yaw"), float("pitch")]
             )
         }
+        guard type == nil else { return nil }
         guard payload["roll"] != nil, payload["yaw"] != nil else { return nil }
         return motionFrame(roll: float("roll"), yaw: float("yaw"), pitch: float("pitch"))
     }

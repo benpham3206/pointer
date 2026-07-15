@@ -92,6 +92,8 @@ final class MotionManager: NSObject, ObservableObject {
     // jitter); alpha ramps up with angular speed for low lag when actually moving.
     private let attitudeEmaAlpha = 0.08
     private let attitudeEmaSpeedGain = 10.0
+    private var previousWrappedYaw: Double?
+    private var unwrappedYaw = 0.0
     private var emaInitialized = false
     private var emaRoll = 0.0
     private var emaPitch = 0.0
@@ -141,6 +143,8 @@ final class MotionManager: NSObject, ObservableObject {
         simPhase = 0
         lastSend = .distantPast
         lastUIPublish = .distantPast
+        previousWrappedYaw = nil
+        unwrappedYaw = 0
         emaInitialized = false
 
         // Sensors work without phone.
@@ -150,12 +154,23 @@ final class MotionManager: NSObject, ObservableObject {
             startHardwareUpdates()
         }
         isTracking = true
-        trackingRuntime.onWillExpire = { [weak self] in
-            // Keep IMU alive across session renewals.
+        WorkoutKeepAlive.shared.onFailure = { [weak self] rootCause, failureType in
+            self?.recordFailure(
+                component: "WorkoutKeepAlive",
+                rootCause: rootCause,
+                failureType: failureType
+            )
+        }
+        WorkoutKeepAlive.shared.fallback = { [weak self] in
             guard let self, self.isTracking else { return }
+            self.trackingRuntime.onWillExpire = { [weak self] in
+                // Keep IMU alive across session renewals.
+                guard let self, self.isTracking else { return }
+                self.trackingRuntime.start()
+            }
             self.trackingRuntime.start()
         }
-        trackingRuntime.start()
+        WorkoutKeepAlive.shared.start()
         sendControl(["type": "reset"])
         log.notice("tracking started")
     }
@@ -171,8 +186,12 @@ final class MotionManager: NSObject, ObservableObject {
         motion.stopDeviceMotionUpdates()
         motion.deviceMotionUpdateInterval = 1.0 / motionHz
 
-        // Default reference frame (no .xArbitraryZVertical) — fewer crash paths.
-        motion.startDeviceMotionUpdates(to: motionQueue) { [weak self] data, error in
+        // Explicit Z-vertical frame is required for world-space ray angles. Stop updates
+        // first above and retain the availability guard to keep the safe restart pattern.
+        motion.startDeviceMotionUpdates(
+            using: .xArbitraryZVertical,
+            to: motionQueue
+        ) { [weak self] data, error in
             guard let self else { return }
             if let error {
                 Task { @MainActor in
@@ -183,9 +202,15 @@ final class MotionManager: NSObject, ObservableObject {
             }
             guard let data else { return }
 
-            let roll = data.attitude.roll
+            // CMAttitude rotation-matrix rows are device axes expressed in the
+            // reference frame. The band follows device ±Y, so row 2 is its world ray.
+            let matrix = data.attitude.rotationMatrix
+            let worldX = matrix.m21
+            let worldY = matrix.m22
+            let worldZ = matrix.m23
+            let roll = atan2(worldZ, hypot(worldX, worldY))
             let pitch = data.attitude.pitch
-            let yaw = data.attitude.yaw
+            let yaw = atan2(worldX, worldY)
             let ax = data.userAcceleration.x
             let ay = data.userAcceleration.y
             let az = data.userAcceleration.z
@@ -243,16 +268,29 @@ final class MotionManager: NSObject, ObservableObject {
         rawGy = gy
         rawGz = gz
 
-        // EMA low-pass the attitude (what drives the cursor). Angle-aware so values
+        // Accumulate azimuth along the shortest path across the ±π seam so the
+        // filtered pointing ray remains continuous through a full turn.
+        if let previousWrappedYaw {
+            let delta = atan2(
+                sin(yaw - previousWrappedYaw),
+                cos(yaw - previousWrappedYaw)
+            )
+            unwrappedYaw += delta
+        } else {
+            unwrappedYaw = yaw
+        }
+        previousWrappedYaw = yaw
+
+        // EMA low-pass the pointing ray (what drives the cursor). Angle-aware so values
         // near ±π don't glitch. First sample seeds the filter to avoid a ramp from 0.
         if emaInitialized {
             emaRoll = angularEma(emaRoll, roll)
             emaPitch = angularEma(emaPitch, pitch)
-            emaYaw = angularEma(emaYaw, yaw)
+            emaYaw = angularEma(emaYaw, unwrappedYaw)
         } else {
             emaRoll = roll
             emaPitch = pitch
-            emaYaw = yaw
+            emaYaw = unwrappedYaw
             emaInitialized = true
         }
 
@@ -280,15 +318,15 @@ final class MotionManager: NSObject, ObservableObject {
             self.gz = gz
         }
 
-        // Send the smoothed attitude to the Mac (accel/gyro pass through raw — display only).
+        // Send the smoothed ray to the Mac (accel/gyro pass through raw — display only).
         sendMotion(
-            roll: emaRoll, pitch: emaPitch, yaw: emaYaw,
+            roll: emaRoll, pitch: 0, yaw: emaYaw,
             ax: ax, ay: ay, az: az,
             gx: gx, gy: gy, gz: gz
         )
     }
 
-    /// EMA step that respects angle wrap-around (shortest path), so roll/yaw near ±π
+    /// EMA step that respects angle wrap-around (shortest path), so ray angles near ±π
     /// don't average across the seam into a wrong value.
     private func angularEma(_ current: Double, _ sample: Double) -> Double {
         let delta = atan2(sin(sample - current), cos(sample - current))
@@ -428,16 +466,16 @@ final class MotionManager: NSObject, ObservableObject {
         log.notice("calibration ended — cursor streaming resumed")
     }
 
-    /// Capture current attitude as a monitor corner for Mac calibration.
+    /// Capture the current pointing ray as a monitor corner for Mac calibration.
     func sendCalibCorner(_ corner: String) {
-        // Capture the smoothed (EMA) attitude so the corner pose matches the live
+        // Capture the smoothed (EMA) ray so the corner pose matches the live
         // filtered motion the Mac fits its map against.
         let dict: [String: Any] = [
             "type": "calib",
             "corner": corner,
             "roll": emaRoll,
             "yaw": emaYaw,
-            "pitch": emaPitch,
+            "pitch": 0.0,
             "ts": Date().timeIntervalSince1970,
         ]
         sendControl(dict)
@@ -446,6 +484,17 @@ final class MotionManager: NSObject, ObservableObject {
 
     func sendCalibClear() {
         sendControl(["type": "calib_clear"])
+    }
+
+    /// Type literal text on the Mac (BLE control channel, phone-relay fallback).
+    func sendText(_ text: String) {
+        guard !text.isEmpty else { return }
+        sendControl(["type": "text", "text": text])
+    }
+
+    /// Tap a special key on the Mac (kVK keycode; modifiers bit0 shift…bit3 cmd).
+    func sendKey(keycode: Int, modifiers: Int = 0) {
+        sendControl(["type": "key", "keycode": keycode, "modifiers": modifiers, "action": 2])
     }
 
     /// Immediate left-click → iPhone → Mac (all delivery paths).
@@ -464,6 +513,7 @@ final class MotionManager: NSObject, ObservableObject {
     }
 
     func stopTracking() {
+        WorkoutKeepAlive.shared.stop()
         trackingRuntime.stop()
         motion.stopDeviceMotionUpdates()
         simTimer?.invalidate()

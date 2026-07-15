@@ -13,6 +13,11 @@ struct ContentView: View {
     @EnvironmentObject var phoneWatchReceiver: PhoneWatchReceiver
     @AppStorage("sensorDebugHost") private var sensorDebugHost: String = ""
     @AppStorage("sensorDebugEnabled") private var sensorDebugEnabled: Bool = false
+    @State private var phonePointerOn = false
+    @State private var phoneEngine: PhonePointerEngine?
+    @State private var showKeyboard = false
+    @State private var phoneCalibNote: String?
+    @State private var phoneCalibExpanded = false
     #elseif os(macOS)
     @EnvironmentObject var mouseController: MouseController
     #endif
@@ -33,18 +38,7 @@ struct ContentView: View {
 
         return ScrollView {
             VStack(spacing: 16) {
-                HStack {
-                    Image(systemName: phoneWatchReceiver.isWatchConnected ? "applewatch.radiowaves.left.and.right" : "applewatch.slash")
-                        .imageScale(.large)
-                        .foregroundStyle(phoneWatchReceiver.isWatchConnected ? .green : .orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(phoneWatchReceiver.statusSummary)
-                            .font(.headline)
-                        Text("Mac: \(macForwarderTitle(for: phoneWatchReceiver.macForwarder.status)) · msgs \(phoneWatchReceiver.messagesReceived)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                statusCluster
 
                 if let p = phoneWatchReceiver.lastPayload {
                     GroupBox("Live IMU (last sample)") {
@@ -65,7 +59,108 @@ struct ContentView: View {
                 }
 
                 macForwarderStatusView(forwarder: forwarder)
-                watchLinkStatusView()
+
+                GroupBox("iPhone pointer") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                forwarder.forwardMotion(["type": "click"])
+                            } label: {
+                                Label("Click", systemImage: "cursorarrow.click")
+                                    .frame(maxWidth: .infinity, minHeight: 36)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                forwarder.forwardMotion(["type": "click", "button": "right"])
+                            } label: {
+                                Label("Right click", systemImage: "cursorarrow.click.2")
+                                    .frame(maxWidth: .infinity, minHeight: 36)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        Toggle("Use iPhone as pointer", isOn: $phonePointerOn)
+                            .onChange(of: phonePointerOn) { _, on in
+                                if !on { setPhoneCalibrationExpanded(false) }
+                                setPhonePointer(on)
+                            }
+                        Text(phonePointerOn
+                             ? "Wand grip: top speaker (+Y) points at the screen. Watch cursor is paused."
+                             : "Watch controls the cursor.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if phonePointerOn {
+                            // Live ray angles: azimuth should INCREASE pointing right,
+                            // elevation should INCREASE pointing up.
+                            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                                if let a = phoneEngine?.currentFilteredAttitude() {
+                                    Text(String(format: "azimuth %+.2f rad · elevation %+.2f rad", a.yaw, a.roll))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("azimuth — · elevation — (settling…)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        if let failure = phoneEngine?.lastFailure?["rootCause"], phonePointerOn {
+                            Text(failure)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                        Button {
+                            showKeyboard.toggle()
+                        } label: {
+                            Label(showKeyboard ? "Hide Mac keyboard" : "Type on Mac", systemImage: "keyboard")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        if phonePointerOn {
+                            DisclosureGroup(
+                                "Calibrate corners",
+                                isExpanded: Binding(
+                                    get: { phoneCalibExpanded },
+                                    set: { setPhoneCalibrationExpanded($0) }
+                                )
+                            ) {
+                                PhoneCalibrationView(
+                                    captureAttitude: { phoneEngine?.currentFilteredAttitude() },
+                                    sendCorner: { name, pose in
+                                        forwarder.forwardMotion([
+                                            "type": "calib", "corner": name,
+                                            "roll": pose.roll, "yaw": pose.yaw, "pitch": pose.pitch,
+                                        ])
+                                    },
+                                    onFinished: { note in
+                                        phoneCalibNote = note
+                                        setPhoneCalibrationExpanded(false)
+                                    }
+                                )
+                            }
+                            .font(.subheadline)
+                            if let note = phoneCalibNote {
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                }
+
+                if showKeyboard {
+                    GlassKeyboardView(
+                        sendText: { forwarder.sendText($0) },
+                        sendKey: { keycode, modifiers in
+                            forwarder.sendKey(keycode: keycode, modifiers: modifiers, action: 2)
+                        }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
 
                 if !forwarder.discoveredMacs.isEmpty {
                     Picker("Mac", selection: Binding(
@@ -79,19 +174,25 @@ struct ContentView: View {
                     .pickerStyle(.menu)
                 }
 
-                GroupBox("Python tracker (Mac)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Stream to Mac TCP :19778", isOn: $sensorDebugEnabled)
-                            .onChange(of: sensorDebugEnabled) { _, _ in applyDebugStream() }
-                        TextField("Mac LAN IP", text: $sensorDebugHost)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .onChange(of: sensorDebugHost) { _, _ in applyDebugStream() }
-                        Text("Run `python3 tools/watch_sensor_tracker.py` on your Mac, then enter this Mac’s IP.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                DisclosureGroup("Diagnostics") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        watchLinkStatusView()
+                        GroupBox("Python tracker (Mac)") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle("Stream to Mac TCP :19778", isOn: $sensorDebugEnabled)
+                                    .onChange(of: sensorDebugEnabled) { _, _ in applyDebugStream() }
+                                TextField("Mac LAN IP", text: $sensorDebugHost)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .onChange(of: sensorDebugHost) { _, _ in applyDebugStream() }
+                                Text("Run `python3 tools/watch_sensor_tracker.py` on your Mac, then enter this Mac’s IP.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
+                .font(.subheadline)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Messages: \(phoneWatchReceiver.messagesReceived)")
@@ -163,8 +264,79 @@ struct ContentView: View {
         }
     }
 
+    /// visionOS-style status cluster: translucent capsules, honest state only.
+    private var statusCluster: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                statusCapsule(
+                    icon: phoneWatchReceiver.isWatchConnected ? "applewatch.radiowaves.left.and.right" : "applewatch.slash",
+                    label: phoneWatchReceiver.isWatchConnected ? "Watch" : "No watch",
+                    ok: phoneWatchReceiver.isWatchConnected
+                )
+                statusCapsule(
+                    icon: "desktopcomputer",
+                    label: macCapsuleLabel,
+                    ok: isMacConnected
+                )
+                statusCapsule(
+                    icon: phonePointerOn ? "iphone.gen3" : "hand.point.up.left",
+                    label: phonePointerOn ? "iPhone pointer" : "Watch pointer",
+                    ok: true
+                )
+            }
+            Text(phoneWatchReceiver.statusSummary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var isMacConnected: Bool {
+        if case .connected = phoneWatchReceiver.macForwarder.status { return true }
+        return false
+    }
+
+    private var macCapsuleLabel: String {
+        if case .connected(let host) = phoneWatchReceiver.macForwarder.status { return host }
+        return "Searching…"
+    }
+
+    private func statusCapsule(icon: String, label: String, ok: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .imageScale(.small)
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(ok ? Color.green.opacity(0.35) : Color.orange.opacity(0.45)))
+    }
+
     private func sensorLine(_ name: String, _ value: Double) -> some View {
         Text(String(format: "%@ %+9.4f", name, value))
+    }
+
+    private func setPhonePointer(_ on: Bool) {
+        let forwarder = phoneWatchReceiver.macForwarder
+        if on {
+            if phoneEngine == nil {
+                phoneEngine = PhonePointerEngine { frame in
+                    forwarder.forwardMotion(frame)
+                }
+            }
+            forwarder.phonePointerEngaged = true
+            phoneEngine?.start()
+        } else {
+            phoneEngine?.stop()
+            forwarder.phonePointerEngaged = false
+        }
+    }
+
+    private func setPhoneCalibrationExpanded(_ expanded: Bool) {
+        phoneCalibExpanded = expanded
+        phoneEngine?.isCalibrating = expanded
     }
 
     private func applyDebugStream() {

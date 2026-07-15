@@ -1,25 +1,19 @@
-# pointer
+# Pointer
 
-Watch → Mac pointer companion. The Watch uses direct Bluetooth LE when the Mac
-server is running with `--ble`; otherwise it automatically keeps the existing
-Watch → iPhone → Mac Bonjour/UDP relay.
+Control a Mac pointer and keyboard from iPhone or Apple Watch.
 
-## Sensor tracker (IMU + barometer)
+## Run
 
-**Fastest on Mac:**
+1. Launch `/Applications/Pointer Mac.app`.
+2. Grant Accessibility permission when prompted.
+3. Open Pointer on iPhone or Apple Watch and start tracking.
 
-```bash
-python3 tools/mac_pointer_server.py --display external --ble
-```
+The Mac menu-bar app listens for Bonjour UDP relay traffic on port `19790`
+(`_pointer._udp`) and advertises an in-process BLE peripheral. It calibrates
+each source independently, arbitrates phone and Watch input, smooths pointer
+motion, and synthesizes cursor and keyboard events.
 
-`--ble` is optional and uses the installed Xcode command-line tools to start a
-small local CoreBluetooth helper. If that helper is unavailable, the server logs
-a structured dependency error and continues serving the UDP relay on port 19790.
-Grant the Python process Accessibility permission before sending cursor events.
+Use the Python programs under `tools/` only as development and diagnostic
+utilities. They are not the normal runtime.
 
-**Xcode:** Run **pointer Watch App** on a physical Watch → **Start tracking**.
-The status pill reads **BLE** once the Mac has connected; otherwise it reads
-**iPhone** and uses the relay. The Simulator shows **SIM** and cannot provide a
-real BLE peripheral connection.
-
-Full steps: **[docs/SENSOR_TRACKER.md](docs/SENSOR_TRACKER.md)**
+See [docs/SENSOR_TRACKER.md](docs/SENSOR_TRACKER.md) for setup and diagnostics.

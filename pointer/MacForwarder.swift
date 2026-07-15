@@ -35,16 +35,28 @@ final class MacForwarder: ObservableObject {
     @Published private(set) var packetsForwarded: UInt = 0
     @Published private(set) var lastSendError: String?
     @Published private(set) var packetsQueued: Int = 0
+    @Published var phonePointerEngaged = false {
+        didSet {
+            guard phonePointerEngaged != oldValue else { return }
+            if phonePointerEngaged {
+                startClaimRefresh()
+            } else {
+                stopClaimRefresh()
+            }
+        }
+    }
 
     private let queue = DispatchQueue(label: "bp.pointer.macforwarder", qos: .userInitiated)
     private var browser: NWBrowser?
     private var connection: NWConnection?
     private var reconnectWorkItem: DispatchWorkItem?
     private var heartbeatTimer: DispatchSourceTimer?
+    private var claimRefreshTimer: DispatchSourceTimer?
     private var shouldStayConnected = false
     private var connectedDisplayName: String?
     private var pendingPackets: [Data] = []
     private let maxPendingPackets = 120
+    private static let phoneSource: UInt8 = 1
 
     init() {
         startBrowsing()
@@ -159,6 +171,76 @@ final class MacForwarder: ObservableObject {
         }
     }
 
+    func sendClaim(active: Bool) {
+        let payload: [String: Any] = [
+            "type": "claim",
+            "source": Self.phoneSource,
+            "active": active,
+        ]
+        guard let data = Self.encode(payload) else { return }
+        queue.async { [weak self] in
+            self?.enqueueOrSend(data)
+        }
+    }
+
+    func sendText(_ text: String) {
+        var chunk = ""
+        var chunkByteCount = 0
+
+        func sendChunk() {
+            guard let data = Self.encode(["type": "text", "text": chunk]) else { return }
+            queue.async { [weak self] in
+                self?.enqueueOrSend(data)
+            }
+        }
+
+        for character in text {
+            let characterText = String(character)
+            let byteCount = characterText.utf8.count
+            if byteCount > 180 {
+                if !chunk.isEmpty {
+                    sendChunk()
+                    chunk = ""
+                    chunkByteCount = 0
+                }
+                for scalar in characterText.unicodeScalars {
+                    let scalarText = String(scalar)
+                    let scalarByteCount = scalarText.utf8.count
+                    if chunkByteCount + scalarByteCount > 180 {
+                        sendChunk()
+                        chunk = ""
+                        chunkByteCount = 0
+                    }
+                    chunk.append(scalarText)
+                    chunkByteCount += scalarByteCount
+                }
+                continue
+            }
+            if !chunk.isEmpty, chunkByteCount + byteCount > 180 {
+                sendChunk()
+                chunk = ""
+                chunkByteCount = 0
+            }
+            chunk.append(character)
+            chunkByteCount += byteCount
+        }
+        if !chunk.isEmpty || text.isEmpty {
+            sendChunk()
+        }
+    }
+
+    func sendKey(keycode: Int, modifiers: Int, action: Int) {
+        guard let data = Self.encode([
+            "type": "key",
+            "keycode": keycode,
+            "modifiers": modifiers,
+            "action": action,
+        ]) else { return }
+        queue.async { [weak self] in
+            self?.enqueueOrSend(data)
+        }
+    }
+
     /// Pack a control/motion dict into a compact binary frame (see mac_pointer_server.py
     /// parse_frame). type byte + little-endian Float32 payload; one datagram per frame.
     static func encode(_ p: [String: Any]) -> Data? {
@@ -173,6 +255,47 @@ final class MacForwarder: ObservableObject {
             return d
         }
         let type = p["type"] as? String
+        if type == "text" {
+            guard let text = p["text"] as? String else { return nil }
+            let bytes = Array(text.utf8)
+            guard bytes.count <= 255 else { return nil }
+            return Data([0x06, UInt8(bytes.count)] + bytes)
+        }
+        if type == "key" {
+            guard let keycode = (p["keycode"] as? NSNumber)?.intValue,
+                  let modifiers = (p["modifiers"] as? NSNumber)?.intValue,
+                  let action = (p["action"] as? NSNumber)?.intValue,
+                  (0...Int(UInt16.max)).contains(keycode),
+                  (0...Int(UInt8.max)).contains(modifiers),
+                  (0...2).contains(action)
+            else { return nil }
+            return Data([
+                0x07,
+                UInt8(keycode & 0xFF),
+                UInt8((keycode >> 8) & 0xFF),
+                UInt8(modifiers),
+                UInt8(action),
+            ])
+        }
+        if type == "click", (p["button"] as? String) == "right" { return Data([0x09]) }
+        if type == "claim" {
+            let source: UInt8
+            if let value = p["source"] as? UInt8 {
+                source = value
+            } else if let value = p["source"] as? NSNumber {
+                source = value.uint8Value
+            } else {
+                return nil
+            }
+            guard let active = p["active"] as? Bool else { return nil }
+            return Data([0x08, source, active ? 1 : 0])
+        }
+        guard type == nil
+                || type == "click"
+                || type == "calib_clear"
+                || type == "reset"
+                || type == "calib"
+        else { return nil }
         if type == "click" || (p["click"] as? NSNumber)?.boolValue == true { return Data([0x02]) }
         if type == "calib_clear" { return Data([0x04]) }
         if type == "reset" { return Data([0x05]) }
@@ -180,6 +303,7 @@ final class MacForwarder: ObservableObject {
             let idx: [String: UInt8] = ["tl": 0, "tr": 1, "bl": 2, "br": 3]
             return withFloats([0x03, idx[(p["corner"] as? String) ?? ""] ?? 0], ["roll", "yaw", "pitch"])
         }
+        guard type == nil else { return nil }
         guard p["roll"] != nil, p["yaw"] != nil else { return nil }
         return withFloats([0x01], ["roll", "yaw", "pitch"])
     }
@@ -190,6 +314,8 @@ final class MacForwarder: ObservableObject {
         reconnectWorkItem = nil
         heartbeatTimer?.cancel()
         heartbeatTimer = nil
+        claimRefreshTimer?.cancel()
+        claimRefreshTimer = nil
         browser?.cancel()
         browser = nil
         connection?.cancel()
@@ -204,6 +330,29 @@ final class MacForwarder: ObservableObject {
     }
 
     // MARK: - Private
+
+    private func startClaimRefresh() {
+        sendClaim(active: true)
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.claimRefreshTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now() + 3, repeating: 3)
+            timer.setEventHandler { [weak self] in
+                self?.sendClaim(active: true)
+            }
+            self.claimRefreshTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func stopClaimRefresh() {
+        sendClaim(active: false)
+        queue.async { [weak self] in
+            self?.claimRefreshTimer?.cancel()
+            self?.claimRefreshTimer = nil
+        }
+    }
 
     private func startHeartbeat() {
         let timer = DispatchSource.makeTimerSource(queue: queue)

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Pointer listens on your local network so your iPhone can forward Apple Watch motion to this Mac.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pointer._udp</string>
+	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Pointer advertises a Bluetooth service so your Apple Watch can send motion and clicks directly to this Mac.</string>
+</dict>
+</plist>

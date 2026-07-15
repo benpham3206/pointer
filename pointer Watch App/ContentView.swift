@@ -21,10 +21,17 @@ struct ContentView: View {
     ]
 
     var body: some View {
+        NavigationStack {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 header
                 clickButton
+                NavigationLink {
+                    WatchKeyboardView(motionManager: motionManager)
+                } label: {
+                    Label("Mac keyboard", systemImage: "keyboard")
+                        .frame(maxWidth: .infinity)
+                }
 
                 if motionManager.isTracking {
                     if motionManager.isCalibrating {
@@ -75,6 +82,7 @@ struct ContentView: View {
                 .tint(motionManager.isTracking ? .red : .green)
             }
             .padding(.horizontal, 6)
+        }
         }
     }
 

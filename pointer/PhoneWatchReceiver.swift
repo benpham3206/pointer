@@ -187,7 +187,12 @@ final class PhoneWatchReceiver: NSObject, ObservableObject, WCSessionDelegate {
 
         macForwarder.ensureConnected()
         if type != "wake" {
-            macForwarder.forwardMotion(message)
+            let isMotion = MotionPayload.fromDictionary(message) != nil
+            let phoneSuppressesWatchPointer = macForwarder.phonePointerEngaged
+                && (isMotion || type == "calib")
+            if !phoneSuppressesWatchPointer {
+                macForwarder.forwardMotion(message)
+            }
             sensorDebugStreamer.send(message)
         }
     }

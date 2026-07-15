@@ -35,11 +35,17 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AA74F1703006F8B400C4EEF7 /* Pointer Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Pointer Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAB2A3DC2FB982B3002E60B8 /* pointer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = pointer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAB2A3E92FB982B4002E60B8 /* pointer Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "pointer Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA74F1713006F8B400C4EEF7 /* Pointer Mac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Pointer Mac";
+			sourceTree = "<group>";
+		};
 		AAB2A3DE2FB982B3002E60B8 /* pointer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = pointer;
@@ -53,6 +59,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		AA74F16D3006F8B400C4EEF7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AAB2A3D92FB982B3002E60B8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -75,6 +88,7 @@
 			children = (
 				AAB2A3DE2FB982B3002E60B8 /* pointer */,
 				AAB2A3ED2FB982B4002E60B8 /* pointer Watch App */,
+				AA74F1713006F8B400C4EEF7 /* Pointer Mac */,
 				AAB2A3DD2FB982B3002E60B8 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -84,6 +98,7 @@
 			children = (
 				AAB2A3DC2FB982B3002E60B8 /* pointer.app */,
 				AAB2A3E92FB982B4002E60B8 /* pointer Watch App.app */,
+				AA74F1703006F8B400C4EEF7 /* Pointer Mac.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -91,6 +106,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		AA74F16F3006F8B400C4EEF7 /* Pointer Mac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA74F17A3006F8B500C4EEF7 /* Build configuration list for PBXNativeTarget "Pointer Mac" */;
+			buildPhases = (
+				AA74F16C3006F8B400C4EEF7 /* Sources */,
+				AA74F16D3006F8B400C4EEF7 /* Frameworks */,
+				AA74F16E3006F8B400C4EEF7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA74F1713006F8B400C4EEF7 /* Pointer Mac */,
+			);
+			name = "Pointer Mac";
+			packageProductDependencies = (
+			);
+			productName = "Pointer Mac";
+			productReference = AA74F1703006F8B400C4EEF7 /* Pointer Mac.app */;
+			productType = "com.apple.product-type.application";
+		};
 		AAB2A3DB2FB982B3002E60B8 /* pointer */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = AAB2A3FA2FB982B5002E60B8 /* Build configuration list for PBXNativeTarget "pointer" */;
@@ -144,9 +181,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2650;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
+					AA74F16F3006F8B400C4EEF7 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					AAB2A3DB2FB982B3002E60B8 = {
 						CreatedOnToolsVersion = 26.5;
 					};
@@ -171,11 +211,19 @@
 			targets = (
 				AAB2A3DB2FB982B3002E60B8 /* pointer */,
 				AAB2A3E82FB982B4002E60B8 /* pointer Watch App */,
+				AA74F16F3006F8B400C4EEF7 /* Pointer Mac */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		AA74F16E3006F8B400C4EEF7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AAB2A3DA2FB982B3002E60B8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -193,6 +241,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AA74F16C3006F8B400C4EEF7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AAB2A3D82FB982B3002E60B8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -218,6 +273,78 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		AA74F1783006F8B500C4EEF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Pointer Mac/PointerMac.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9M7LCBZPAV;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Pointer Mac/PointerMacInfo.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = bp.pointer.macos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AA74F1793006F8B500C4EEF7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Pointer Mac/PointerMac.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9M7LCBZPAV;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Pointer Mac/PointerMacInfo.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = bp.pointer.macos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		AAB2A3F42FB982B5002E60B8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -342,12 +469,12 @@
 				DEVELOPMENT_TEAM = 9M7LCBZPAV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_CFBundleDisplayName = pointer;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = bp.pointer;
-				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				INFOPLIST_KEY_WKExtendedRuntimeSessionModes = "physical-therapy";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -378,12 +505,12 @@
 				DEVELOPMENT_TEAM = 9M7LCBZPAV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_CFBundleDisplayName = pointer;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pointer uses Bluetooth to send low-latency Watch tracking and clicks directly to your Mac.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = bp.pointer;
-				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				INFOPLIST_KEY_WKExtendedRuntimeSessionModes = "physical-therapy";
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -485,6 +612,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		AA74F17A3006F8B500C4EEF7 /* Build configuration list for PBXNativeTarget "Pointer Mac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA74F1783006F8B500C4EEF7 /* Debug */,
+				AA74F1793006F8B500C4EEF7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		AAB2A3D72FB982B3002E60B8 /* Build configuration list for PBXProject "pointer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
