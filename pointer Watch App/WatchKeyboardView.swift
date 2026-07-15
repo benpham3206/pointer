@@ -39,7 +39,7 @@ struct WatchKeyboardView: View {
                     Label("Send to Mac", systemImage: "paperplane.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .tint(.blue)
                 .disabled(draft.isEmpty)
 
@@ -52,7 +52,7 @@ struct WatchKeyboardView: View {
                             Image(systemName: key.symbol == "space" ? "space" : key.symbol)
                                 .frame(maxWidth: .infinity, minHeight: 32)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                     }
                 }
                 Text("Keys go straight to the Mac cursor's focus.")

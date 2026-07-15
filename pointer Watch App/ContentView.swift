@@ -83,6 +83,8 @@ struct ContentView: View {
             }
             .padding(.horizontal, 6)
         }
+        // Liquid Glass pass: every un-styled button in the tree picks up glass.
+        .buttonStyle(.glass)
         }
     }
 
@@ -146,7 +148,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(.glassProminent)
         .tint(clickFlash ? .yellow : .blue)
         .handGestureShortcut(.primaryAction)
         .accessibilityLabel("Left click")

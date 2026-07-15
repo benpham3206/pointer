@@ -70,7 +70,7 @@ struct ContentView: View {
                                 Label("Click", systemImage: "cursorarrow.click")
                                     .frame(maxWidth: .infinity, minHeight: 36)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
 
                             Button {
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -79,7 +79,7 @@ struct ContentView: View {
                                 Label("Right click", systemImage: "cursorarrow.click.2")
                                     .frame(maxWidth: .infinity, minHeight: 36)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                         }
 
                         Toggle("Use iPhone as pointer", isOn: $phonePointerOn)
@@ -118,7 +118,7 @@ struct ContentView: View {
                             Label(showKeyboard ? "Hide Mac keyboard" : "Type on Mac", systemImage: "keyboard")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
 
                         if phonePointerOn {
                             DisclosureGroup(
