@@ -489,7 +489,23 @@ final class MotionManager: NSObject, ObservableObject {
     /// Type literal text on the Mac (BLE control channel, phone-relay fallback).
     func sendText(_ text: String) {
         guard !text.isEmpty else { return }
-        sendControl(["type": "text", "text": text])
+        // Chunk to keep each 0x06 frame's UTF-8 payload under its 255-byte length
+        // limit (dictated sentences can exceed it); ~180 B leaves headroom and
+        // never splits a character. Mirrors MacForwarder.sendText.
+        var remaining = Substring(text)
+        while !remaining.isEmpty {
+            var chunk = ""
+            var bytes = 0
+            while let c = remaining.first {
+                let l = String(c).utf8.count
+                if bytes + l > 180 { break }
+                chunk.append(c)
+                bytes += l
+                remaining = remaining.dropFirst()
+            }
+            if chunk.isEmpty { break }
+            sendControl(["type": "text", "text": chunk])
+        }
     }
 
     /// Tap a special key on the Mac (kVK keycode; modifiers bit0 shift…bit3 cmd).
