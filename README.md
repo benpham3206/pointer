@@ -17,3 +17,7 @@ Use the Python programs under `tools/` only as development and diagnostic
 utilities. They are not the normal runtime.
 
 See [docs/SENSOR_TRACKER.md](docs/SENSOR_TRACKER.md) for setup and diagnostics.
+
+## Test the Watch BLE transport
+
+Run `./tests/ble-transport/run.sh` with the macOS Swift toolchain. It compiles `BLETransport.swift` against a local CoreBluetooth test double in a temporary directory and reports each check. It does not test physical Watch behavior or CoreBluetooth scheduling.

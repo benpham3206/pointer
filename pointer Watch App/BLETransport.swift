@@ -79,10 +79,14 @@ final class BLETransport: NSObject, ObservableObject {
         guard isConnected else { return false }
         queuedControlFrames.append(frame)
         if queuedControlFrames.count > maxQueuedControlFrames {
-            queuedControlFrames.removeFirst(queuedControlFrames.count - maxQueuedControlFrames)
+            let framesToDiscard = queuedControlFrames.count - maxQueuedControlFrames
+            let firstDiscardableIndex = controlWriteInFlight ? 1 : 0
+            queuedControlFrames.removeSubrange(
+                firstDiscardableIndex..<(firstDiscardableIndex + framesToDiscard)
+            )
             reportFailure(
                 component: "BLETransport.sendControl",
-                rootCause: "BLE control retry queue reached \(maxQueuedControlFrames) frames; oldest frame was discarded",
+                rootCause: "BLE control retry queue reached \(maxQueuedControlFrames) frames; oldest unsent frame was discarded",
                 failureType: "backpressure"
             )
         }
@@ -168,6 +172,7 @@ final class BLETransport: NSObject, ObservableObject {
 
     private func disconnectAndRetry(after delay: TimeInterval) {
         isConnected = false
+        setLinkState(.scanning)
         motionCharacteristic = nil
         controlCharacteristic = nil
         controlWriteInFlight = false
